@@ -1,30 +1,28 @@
 import SwiftUI
 import UIKit
 
-// ─── Shared color recipe (v103) ─────────────────────────────────────────────
+// ─── Shared color recipe (v104) ─────────────────────────────────────────────
 //
-// 8-stop palette tuned by Fabi 2026-05-10 — 60% lands on a confident
-// yellow-green (#B4DC46) instead of the muddy mid-tone the v102 stops produced.
-// Sweet spot stops: red → red-orange → orange → approach → ⭐ yellow-green →
-// green → teal → violet. Used by both HeroRecoveryRing (classic) and
-// SmokeRecoveryRing (Mode A — smoke wisps off the arc tip).
+// Single-color ring — score maps to ONE solid color, no rainbow gradient.
+// Premium 6-stop red→green palette tuned by Fabi 2026-05-13:
+//   0  → deep saturated red
+//   20 → red-orange
+//   40 → warm amber
+//   60 → yellow-green ⭐ (Fabi's sweet spot)
+//   80 → vivid green
+//   100 → deep emerald
+// Each stop chosen for high chroma — avoids muddy mid-tones that plague raw
+// HSL/RGB interpolation. lerpRGB picks the bracketing pair and lerps in
+// linear-RGB so the 2-stop hop is short enough to stay clean.
 
 fileprivate let recoveryStops: [(pos: Double, color: Color)] = [
-    (0,   Color(red: 1.000, green: 0.231, blue: 0.188)),  // #FF3B30 Apple red
-    (18,  Color(red: 1.000, green: 0.431, blue: 0.235)),  // red-orange
-    (38,  Color(red: 1.000, green: 0.647, blue: 0.196)),  // warm orange
-    (52,  Color(red: 0.941, green: 0.843, blue: 0.235)),  // approach
-    (60,  Color(red: 0.706, green: 0.863, blue: 0.275)),  // ⭐ yellow-green sweet spot
-    (75,  Color(red: 0.314, green: 0.863, blue: 0.510)),  // healthy green
-    (88,  Color(red: 0.196, green: 0.784, blue: 0.784)),  // teal
-    (100, Color(red: 0.549, green: 0.486, blue: 0.965)),  // violet — ultra-prime
+    (0,   Color(red: 0.949, green: 0.231, blue: 0.235)),  // #F23B3C deep saturated red
+    (20,  Color(red: 1.000, green: 0.435, blue: 0.235)),  // #FF6F3C red-orange
+    (40,  Color(red: 1.000, green: 0.733, blue: 0.224)),  // #FFBB39 warm amber
+    (60,  Color(red: 0.706, green: 0.863, blue: 0.275)),  // #B4DC46 yellow-green ⭐
+    (80,  Color(red: 0.298, green: 0.804, blue: 0.392)),  // #4CCD64 vivid green
+    (100, Color(red: 0.094, green: 0.682, blue: 0.388))   // #18AE63 deep emerald
 ]
-
-fileprivate var recoveryGradientStops: Gradient {
-    Gradient(stops: recoveryStops.map {
-        .init(color: $0.color, location: $0.pos / 100.0)
-    })
-}
 
 /// Continuously-interpolated recovery color at a given score (0–100).
 /// Used by both rings + glow + label color so that 50, 60, and 61 read as
@@ -82,21 +80,17 @@ struct HeroRecoveryRing: View {
                 .stroke(scoreColor.opacity(0.10), lineWidth: lineWidth)
                 .frame(width: size, height: size)
 
-            // Progress arc with continuous angular gradient (8-stop)
+            // Progress arc — SOLID color matched to score (v104 — no rainbow)
             Circle()
                 .trim(from: 0, to: trimEnd)
                 .stroke(
-                    AngularGradient(
-                        gradient: recoveryGradientStops,
-                        center: .center,
-                        startAngle: .degrees(-90),
-                        endAngle: .degrees(270)
-                    ),
+                    scoreColor,
                     style: StrokeStyle(lineWidth: lineWidth, lineCap: .round)
                 )
                 .frame(width: size, height: size)
                 .rotationEffect(.degrees(-90))
                 .animation(DS.Anim.ringEntrance.delay(0.15), value: appeared)
+                .animation(.easeInOut(duration: 0.6), value: scoreColor)
                 .statusGlow(scoreColor, intensity: appeared ? 1.0 : 0)
 
             // Center content
@@ -244,21 +238,17 @@ struct SmokeRecoveryRing: View {
                 .stroke(scoreColor.opacity(0.10), lineWidth: lineWidth)
                 .frame(width: size, height: size)
 
-            // ── Progress arc with same 8-stop gradient ────────────────────
+            // ── Progress arc — SOLID color (v104, smoke variant) ──────────
             Circle()
                 .trim(from: 0, to: trimEnd)
                 .stroke(
-                    AngularGradient(
-                        gradient: recoveryGradientStops,
-                        center: .center,
-                        startAngle: .degrees(-90),
-                        endAngle: .degrees(270)
-                    ),
+                    scoreColor,
                     style: StrokeStyle(lineWidth: lineWidth, lineCap: .round)
                 )
                 .frame(width: size, height: size)
                 .rotationEffect(.degrees(-90))
                 .animation(DS.Anim.ringEntrance.delay(0.15), value: appeared)
+                .animation(.easeInOut(duration: 0.6), value: scoreColor)
                 .statusGlow(scoreColor, intensity: appeared ? 1.0 : 0)
 
             // ── Center content ────────────────────────────────────────────
