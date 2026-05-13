@@ -189,7 +189,6 @@ jobs:
           {
             "name": "Lucid Health",
             "bundleIdentifier": "com.fabi.lucidhealth",
-            "marketplaceID": "9000000002",
             "developerName": "Fabi",
             "localizedDescription": "Unified health companion - streams Whoop BLE data and logs meals with Gemini Vision to surface brain-health patterns.",
             "iconURL": "https://app.lucid-ai.app/icon-512.png",
@@ -201,7 +200,7 @@ jobs:
             "downloadURL": "${DOWNLOAD_URL}",
             "size": ${IPA_SIZE},
             "minOSVersion": "26.0",
-            "versions": [{"version":"1.0.${RUN_NUMBER}","buildVersion":"${RUN_NUMBER}","date":"${BUILD_DATE_ISO}","size":${IPA_SIZE},"downloadURL":"${DOWNLOAD_URL}","assetURLs":{"manifest":"${SUPABASE_STORAGE_PUBLIC_BASE}/lucidhealth-manifest.json"},"localizedDescription":"Build ${RUN_NUMBER}","minOSVersion":"26.0"}],
+            "versions": [{"version":"1.0.${RUN_NUMBER}","buildVersion":"${RUN_NUMBER}","date":"${BUILD_DATE_ISO}","size":${IPA_SIZE},"downloadURL":"${DOWNLOAD_URL}","localizedDescription":"Build ${RUN_NUMBER}","minOSVersion":"26.0"}],
             "appPermissions": {"entitlements":["com.apple.security.application-groups"],"privacy":{"NSBluetoothAlwaysUsageDescription":"Connects to Whoop via BLE.","NSBluetoothPeripheralUsageDescription":"Connects to Whoop via BLE (legacy peripheral key).","NSCameraUsageDescription":"Take photos of meals.","NSPhotoLibraryUsageDescription":"Pick existing meal photos.","NSHealthShareUsageDescription":"Reads health data from Apple Health for body-state correlation.","NSHealthUpdateUsageDescription":"Writes recovery and HRV data back to Apple Health.","NSLocationWhenInUseUsageDescription":"Tags meals and body-state snapshots with location.","NSLocationAlwaysAndWhenInUseUsageDescription":"Background location for activity context (rides, walks)."}}
           }
           JSONEND
