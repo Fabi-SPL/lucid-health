@@ -1,46 +1,63 @@
 import SwiftUI
 import UIKit
 
-// ─── Shared color recipe (v104) ─────────────────────────────────────────────
+// ─── Recovery color recipe (v105) ───────────────────────────────────────────
 //
-// Single-color ring — score maps to ONE solid color, no rainbow gradient.
-// Premium 6-stop red→green palette tuned by Fabi 2026-05-13:
-//   0  → deep saturated red
-//   20 → red-orange
-//   40 → warm amber
-//   60 → yellow-green ⭐ (Fabi's sweet spot)
-//   80 → vivid green
-//   100 → deep emerald
-// Each stop chosen for high chroma — avoids muddy mid-tones that plague raw
-// HSL/RGB interpolation. lerpRGB picks the bracketing pair and lerps in
-// linear-RGB so the 2-stop hop is short enough to stay clean.
+// Continuous HSB curve — every integer score maps to a UNIQUE color so 60
+// reads visibly different from 61, 95 reads visibly different from 90, etc.
+// No anchor stops, no discrete bucketing.
+//
+// Hue path (piecewise linear, biased to put yellow-green at 60):
+//   score   hue°    color name
+//   0       0       deep red
+//   30      30      red-orange
+//   60      80      yellow-green ⭐ (Fabi's sweet spot)
+//   100     140     rich green
+//
+// Saturation peaks near the warm zone (yellows need high chroma to pop),
+// dips slightly at red+green ends to avoid neon-toy feel. Brightness peaks
+// around the amber/yellow band where the eye expects max luminance, eases
+// down at red (deeper) and green (richer) endpoints.
+//
+// Per-unit perceptual delta: ~1.3-1.7° hue shift per recovery point, plus
+// micro brightness/saturation drift — enough that any two adjacent scores
+// read as distinct colors.
 
-fileprivate let recoveryStops: [(pos: Double, color: Color)] = [
-    (0,   Color(red: 0.949, green: 0.231, blue: 0.235)),  // #F23B3C deep saturated red
-    (20,  Color(red: 1.000, green: 0.435, blue: 0.235)),  // #FF6F3C red-orange
-    (40,  Color(red: 1.000, green: 0.733, blue: 0.224)),  // #FFBB39 warm amber
-    (60,  Color(red: 0.706, green: 0.863, blue: 0.275)),  // #B4DC46 yellow-green ⭐
-    (80,  Color(red: 0.298, green: 0.804, blue: 0.392)),  // #4CCD64 vivid green
-    (100, Color(red: 0.094, green: 0.682, blue: 0.388))   // #18AE63 deep emerald
-]
-
-/// Continuously-interpolated recovery color at a given score (0–100).
-/// Used by both rings + glow + label color so that 50, 60, and 61 read as
-/// distinct colors instead of the discrete-bucket bug Fabi flagged.
 fileprivate func recoveryColor(at score: Double) -> Color {
     let s = max(0, min(100, score))
-    var lo = recoveryStops[0]
-    var hi = recoveryStops[recoveryStops.count - 1]
-    for i in 0..<(recoveryStops.count - 1) {
-        if s >= recoveryStops[i].pos && s <= recoveryStops[i + 1].pos {
-            lo = recoveryStops[i]
-            hi = recoveryStops[i + 1]
-            break
-        }
+
+    // Piecewise hue curve in degrees (0-360)
+    let hueDeg: Double
+    if s <= 30 {
+        // 0→30°: red → red-orange (1° per recovery point)
+        hueDeg = s * 1.0
+    } else if s <= 60 {
+        // 30→80°: red-orange → yellow-green (~1.67° per recovery point)
+        hueDeg = 30 + (s - 30) * (50.0 / 30.0)
+    } else {
+        // 80→140°: yellow-green → rich green (1.5° per recovery point)
+        hueDeg = 80 + (s - 60) * (60.0 / 40.0)
     }
-    let span = hi.pos - lo.pos
-    let t = span == 0 ? 0 : (s - lo.pos) / span
-    return Color.lerpRGB(from: lo.color, to: hi.color, t: t)
+
+    // Saturation curve — peak at warm zone, slight ease at endpoints
+    // Gaussian bell centered at score=50, width ~30
+    let satPeak = 0.92
+    let satFloor = 0.78
+    let satGauss = exp(-pow((s - 50.0) / 30.0, 2))
+    let saturation = satFloor + (satPeak - satFloor) * satGauss
+
+    // Brightness curve — peak in amber zone, deeper at green end for richness
+    // Asymmetric: red gets 0.92, yellow zone 0.97, deep green eases to 0.78
+    let brightness: Double
+    if s < 30 {
+        brightness = 0.88 + (s / 30.0) * 0.07              // 0.88 → 0.95
+    } else if s < 65 {
+        brightness = 0.95 + sin((s - 30) / 35.0 * .pi) * 0.03  // 0.95 → 0.98 → 0.95
+    } else {
+        brightness = 0.95 - (s - 65) / 35.0 * 0.17         // 0.95 → 0.78
+    }
+
+    return Color(hue: hueDeg / 360.0, saturation: saturation, brightness: brightness)
 }
 
 /// Tier label for a given score. 5-tier (more granular than red/yellow/green).
