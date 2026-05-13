@@ -23,40 +23,36 @@ extension HealthEngine {
 
     // MARK: - Recovery Score (0–100, MORNING-LOCKED)
 
-    /// Compute the morning recovery score. Idempotent for the day —
-    /// after the first successful compute, this is a no-op until next sleep-end.
-    /// Called from BLEManager wake-up handler and SleepEngine.gapReplay.
-    /// Will NOT recompute from live HRV at any other call site.
+    /// Morning recovery hook.
+    /// v102 (2026-05-13) — recovery_score is now computed SERVER-SIDE via
+    /// Supabase pg function `compute_recovery_score` (personal-percentile
+    /// formula). This function no longer computes a local score. Instead it:
+    ///   1. Triggers the server recompute RPC for today
+    ///   2. Lets the existing scoresResult fetch in HealthEngine.fetchBaseline
+    ///      pick up the fresh value
+    ///   3. Locks the day so we don't refetch on every wake-up event
+    ///   4. Seeds Body Battery from whatever recovery value is now present
+    ///
+    /// Local debug contributions (HRV/RHR/Sleep) are still computed for the
+    /// stats overlay but are no longer authoritative.
     func computeRecovery() {
-        // Lock guard: if we already computed today, do nothing. This is THE fix
-        // for the 90% → 9% intraday swing.
         let today = Calendar.current.startOfDay(for: Date())
         if let locked = recoveryLockedDate, Calendar.current.isDate(locked, inSameDayAs: today) {
             return
         }
 
-        // Need *some* HRV to compute. Fall back to currentRMSSD if no
-        // sleep-window samples (e.g. strap connected mid-morning).
+        // Debug-only HRV component for stats overlay
         let sleepHRV = medianSleepRMSSD()
         let hrvForCompute = sleepHRV > 0 ? sleepHRV : currentRMSSD
-        guard hrvForCompute > 0 else { return }
-
-        // 1. HRV component — z-score vs 30d baseline, sleep-window only.
-        // Whoop measures HRV during last SWS; we approximate with median of
-        // last 360 sleep RMSSD samples (= ~6h of sleep).
         let hrvBaseline = baselineRMSSD.isEmpty ? baselineHRV : (baselineRMSSD.reduce(0, +) / Double(baselineRMSSD.count))
         let hrvSD = baselineRMSSD.count >= 3 ? standardDev(baselineRMSSD) : max(hrvBaseline * 0.15, 5)
-        let hrvZ = hrvSD > 0 ? (hrvForCompute - hrvBaseline) / hrvSD : 0
-        let hrvComponent = sigmoid(hrvZ) * 100 * 0.40
+        let hrvZ = hrvSD > 0 && hrvForCompute > 0 ? (hrvForCompute - hrvBaseline) / hrvSD : 0
+        let hrvComponent = hrvForCompute > 0 ? sigmoid(hrvZ) * 100 * 0.40 : 0
 
-        // 2. RHR component — use sleepingMinHR (already tracked during sleep
-        // stages, not awake), NOT recentHR.suffix(10) which captures whatever
-        // the user is doing at this exact second.
         let restingHRForCompute: Double
         if sleepingMinHR > 0 {
             restingHRForCompute = sleepingMinHR
         } else if !recentHR.isEmpty {
-            // Fallback: median of last 30 readings (smoother than mean of 10)
             let sorted = recentHR.suffix(30).sorted()
             restingHRForCompute = sorted[sorted.count / 2]
         } else {
@@ -66,60 +62,52 @@ extension HealthEngine {
         let rhrZ = rhrSD > 0 ? (calibration.medianRHR - restingHRForCompute) / rhrSD : 0
         let rhrComponent = sigmoid(rhrZ) * 100 * 0.25
 
-        // 3. Sleep quality component
         let sleepComponent = (sleepScore > 0 ? sleepScore : 50) * 0.25
 
-        // 4. Strain modifier — yesterday's strain depresses recovery if HRV/RHR
-        // haven't fully rebounded. Pulls from the persisted 28d strain history.
-        let dailyStrain = UserDefaults.standard.array(forKey: dailyStrainKey) as? [Double] ?? []
-        let strainModifier: Double
-        if dailyStrain.count >= 7 {
-            let last7Avg = Array(dailyStrain.suffix(7)).reduce(0, +) / 7.0
-            let yesterday = dailyStrain.last ?? last7Avg
-            // If yesterday's strain was 1.5x last week's avg, dock 10%
-            let ratio = last7Avg > 0 ? yesterday / last7Avg : 1.0
-            let dock = min(max((ratio - 1.0) * 0.10, 0), 0.10)
-            strainModifier = -dock * 100
-        } else {
-            strainModifier = 0
-        }
-
-        let rawScore = hrvComponent + rhrComponent + sleepComponent + strainModifier
-        let score = min(max(rawScore, 0), 100)
-
         DispatchQueue.main.async {
-            self.recoveryScore = round(score)
+            // Stats overlay debug values only — NOT the score
             self.recoveryHRVContribution = round(hrvComponent * 10) / 10
             self.recoveryRHRContribution = round(rhrComponent * 10) / 10
             self.recoverySleepContribution = round(sleepComponent * 10) / 10
-            self.recoveryRRContribution = round(strainModifier * 10) / 10  // reused slot for strain
+            self.recoveryRRContribution = 0
 
-            if score >= 67 {
-                self.recoveryLabel = "Green"
-            } else if score >= 34 {
-                self.recoveryLabel = "Yellow"
-            } else {
-                self.recoveryLabel = "Red"
-            }
-
-            // LOCK for the day. Persist so cold start respects the lock.
+            // Lock the day. recoveryScore stays whatever server-fetch most
+            // recently set it to (HealthEngine.fetchBaseline → scoresResult).
             self.recoveryLockedDate = today
             UserDefaults.standard.set(today, forKey: self.recoveryLockedDateKey)
-            UserDefaults.standard.set(score, forKey: self.recoveryScoreTodayKey)
 
-            // Seed Body Battery from this morning recovery + overnight HRV delta.
-            // Per Firstbeat: BB[wake] = recovery × 0.7 + 25 + (HRV − baseline) × 0.5
-            // This is the ONLY time the wake-up seed runs.
-            let hrvDelta = hrvForCompute - hrvBaseline
-            let seed = (score * 0.7) + 25.0 + (hrvDelta * 0.5)
-            self.bodyBattery = min(max(seed, 15), 100)
-            self.saveBodyBattery()
+            // Body Battery seed — use whatever recovery server has given us
+            if self.recoveryScore > 0 {
+                let hrvDelta = hrvForCompute > 0 ? hrvForCompute - hrvBaseline : 0
+                let seed = (self.recoveryScore * 0.7) + 25.0 + (hrvDelta * 0.5)
+                self.bodyBattery = min(max(seed, 15), 100)
+                self.saveBodyBattery()
+                print("[Recovery] v102 day-lock. Server recovery: \(Int(self.recoveryScore)). Body Battery seeded: \(Int(self.bodyBattery))%")
+            } else {
+                print("[Recovery] v102 day-lock. Server recovery not yet loaded — body battery untouched.")
+            }
 
-            // Clear the sleep-period buffer for next night
             self.sleepPeriodRMSSDSamples.removeAll()
+        }
 
-            print("[Recovery] LOCKED for today: \(Int(score)) (HRV \(String(format: "%.0f", hrvComponent)) + RHR \(String(format: "%.0f", rhrComponent)) + Sleep \(String(format: "%.0f", sleepComponent)) + Strain \(String(format: "%.0f", strainModifier)))")
-            print("[Recovery] Body Battery seeded: \(Int(self.bodyBattery))% (recovery \(Int(score)) × 0.7 + 25 + hrvDelta \(String(format: "%.1f", hrvDelta)) × 0.5)")
+        // Trigger server recompute. Fresh value lands back via the @Published
+        // recoveryScore update inside recomputeHealthMetrics's return + the
+        // call sites that wire result.recovery into healthEngine.recoveryScore
+        // (BLEManager.swift:419 and TodayView.swift:200).
+        Task { [weak self] in
+            guard self != nil else { return }
+            let result = await SupabaseClient.shared.recomputeHealthMetrics()
+            await MainActor.run {
+                guard let self else { return }
+                if let r = result?.recovery, r > 0 {
+                    self.recoveryScore = round(r)
+                    if r >= 67 { self.recoveryLabel = "Green" }
+                    else if r >= 34 { self.recoveryLabel = "Yellow" }
+                    else { self.recoveryLabel = "Red" }
+                    UserDefaults.standard.set(r, forKey: self.recoveryScoreTodayKey)
+                    print("[Recovery] v102 server recompute landed: \(Int(r))")
+                }
+            }
         }
     }
 
