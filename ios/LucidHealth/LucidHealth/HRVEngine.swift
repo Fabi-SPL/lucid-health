@@ -1,0 +1,448 @@
+import Foundation
+
+// ════════════════════════════════════════════════════════════
+// HRV Engine — RMSSD, SDNN, pNN50, DFA α1, Respiratory Rate
+// Extension on HealthEngine for all HRV-related computation
+//
+// Research basis:
+//   - RMSSD: vagal tone marker (Task Force 1996)
+//   - SDNN: best single predictor of executive function (Poole 2018)
+//   - pNN50: correlates with processing speed (Shaffer & Ginsberg 2017)
+//   - DFA α1: overtraining detection (Plews 2013)
+//   - Respiratory rate: RSA extraction via autocorrelation
+//   - Cognitive Readiness: composite from Thayer 2022 meta-analysis
+// ════════════════════════════════════════════════════════════
+
+extension HealthEngine {
+
+    // MARK: - RR Interval Input
+
+    /// Add a new RR interval (in milliseconds) from the Whoop strap
+    func addRRInterval(_ rr: Double) {
+        // Filter ectopic beats: reject >20% deviation from local median
+        if !rrBuffer.isEmpty {
+            let recent = Array(rrBuffer.suffix(5))
+            let sorted = recent.sorted()
+            let median = sorted[sorted.count / 2]
+            if abs(rr - median) / median > 0.20 {
+                return  // ectopic beat, skip
+            }
+        }
+
+        rrBuffer.append(rr)
+        rrTimestamps.append(Date())
+
+        // Keep buffer size bounded
+        if rrBuffer.count > rrBufferSize {
+            rrBuffer.removeFirst()
+            rrTimestamps.removeFirst()
+        }
+
+        // Recompute HRV metrics every 10 new RR intervals
+        if rrBuffer.count >= rmssdWindowSize && rrBuffer.count % 10 == 0 {
+            computeRMSSD()
+            computeSDNN()
+            computePNN50()
+            computePoincaré()
+            computeRespiratoryRate()
+        }
+
+        // DFA α1 needs 120+ intervals — compute less frequently
+        if rrBuffer.count >= 120 && rrBuffer.count % 30 == 0 {
+            computeDFAAlpha1()
+        }
+
+        // Baevsky Stress Index — needs ~100+ RRs (5+ min). Recompute every 30 new RRs.
+        if rrBuffer.count >= 100 && rrBuffer.count % 30 == 0 {
+            computeBaevskyStress()
+        }
+    }
+
+    // MARK: - RMSSD Computation
+
+    /// RMSSD = Root Mean Square of Successive Differences
+    func computeRMSSD() {
+        let window = Array(rrBuffer.suffix(rmssdWindowSize))
+        guard window.count >= 2 else { return }
+
+        var sumSquaredDiffs: Double = 0
+        for i in 1..<window.count {
+            let diff = window[i] - window[i - 1]
+            sumSquaredDiffs += diff * diff
+        }
+        let rmssd = sqrt(sumSquaredDiffs / Double(window.count - 1))
+
+        DispatchQueue.main.async {
+            self.currentRMSSD = rmssd
+            self.lnRMSSD = rmssd > 0 ? log(rmssd) : 0
+            UserDefaults.standard.set(rmssd, forKey: self.currentRMSSDKey)
+            self.updateReadiness()
+            // Feed RMSSD slope tracker — rising trend across 3×5min windows =
+            // N3→N2→N1 transition, primary wake-readiness signal.
+            self.feedRmssdForSlope(rmssd)
+
+            // Capture sleep-window RMSSD samples for the morning recovery
+            // computation. Whoop uses last-SWS HRV; we approximate with the
+            // last hour of sleep (kept rolling at 360 samples = 6h @ 1/min).
+            // Buchheit 2014: daytime HRV is contaminated by task-state, so
+            // recovery must use sleep-window samples only.
+            if self.sleepDetected && rmssd > 0 {
+                self.sleepPeriodRMSSDSamples.append(rmssd)
+                if self.sleepPeriodRMSSDSamples.count > 360 {
+                    self.sleepPeriodRMSSDSamples.removeFirst(self.sleepPeriodRMSSDSamples.count - 360)
+                }
+            }
+        }
+
+        // Track 5-min RMSSD values
+        rmssdHistory.append(rmssd)
+    }
+
+    // MARK: - SDNN (Standard Deviation of NN Intervals)
+    // Best single predictor of executive function (Poole 2018).
+    // Captures overall autonomic function (both sympathetic + parasympathetic).
+
+    func computeSDNN() {
+        let window = Array(rrBuffer.suffix(rmssdWindowSize))
+        guard window.count >= 10 else { return }
+
+        let mean = window.reduce(0, +) / Double(window.count)
+        let variance = window.map { ($0 - mean) * ($0 - mean) }.reduce(0, +) / Double(window.count)
+
+        DispatchQueue.main.async {
+            self.sdnn = sqrt(variance)
+        }
+    }
+
+    // MARK: - pNN50 (% successive intervals >50ms apart)
+    // Correlates with information processing speed (Shaffer & Ginsberg 2017).
+
+    func computePNN50() {
+        let window = Array(rrBuffer.suffix(rmssdWindowSize))
+        guard window.count >= 10 else { return }
+
+        var count50 = 0
+        for i in 1..<window.count {
+            if abs(window[i] - window[i - 1]) > 50 {
+                count50 += 1
+            }
+        }
+
+        DispatchQueue.main.async {
+            self.pnn50 = Double(count50) / Double(window.count - 1) * 100
+        }
+    }
+
+    // MARK: - DFA α1 (Detrended Fluctuation Analysis)
+    // Detects overtraining/overreaching BEFORE subjective fatigue.
+    // More sensitive than RMSSD to training stress.
+    // α1 ≈ 1.0 at rest = healthy fractal correlations
+    // α1 dropping toward 0.5 = autonomic stress / overreaching
+
+    func computeDFAAlpha1() {
+        let rr = Array(rrBuffer.suffix(120))
+        guard rr.count >= 100 else { return }
+
+        // Step 1: Integrate the RR series (cumulative sum of deviations from mean)
+        let mean = rr.reduce(0, +) / Double(rr.count)
+        var integrated = [Double](repeating: 0, count: rr.count)
+        integrated[0] = rr[0] - mean
+        for i in 1..<rr.count {
+            integrated[i] = integrated[i - 1] + (rr[i] - mean)
+        }
+
+        // Step 2: Compute F(n) for window sizes 4 to 16
+        let boxSizes = [4, 6, 8, 10, 12, 16]
+        var logN = [Double]()
+        var logF = [Double]()
+
+        for n in boxSizes {
+            guard n <= rr.count / 4 else { continue }
+
+            let numBoxes = rr.count / n
+            guard numBoxes > 0 else { continue }
+
+            var totalResidual: Double = 0
+
+            for b in 0..<numBoxes {
+                let start = b * n
+                let end = start + n
+
+                // Linear least-squares fit within box
+                var sumX: Double = 0, sumY: Double = 0, sumXY: Double = 0, sumX2: Double = 0
+                for i in start..<end {
+                    let x = Double(i - start)
+                    let y = integrated[i]
+                    sumX += x; sumY += y; sumXY += x * y; sumX2 += x * x
+                }
+                let nD = Double(n)
+                let slope = (nD * sumXY - sumX * sumY) / (nD * sumX2 - sumX * sumX)
+                let intercept = (sumY - slope * sumX) / nD
+
+                // Residual variance
+                for i in start..<end {
+                    let x = Double(i - start)
+                    let trend = slope * x + intercept
+                    let residual = integrated[i] - trend
+                    totalResidual += residual * residual
+                }
+            }
+
+            let fn = sqrt(totalResidual / Double(numBoxes * n))
+            if fn > 0 {
+                logN.append(log(Double(n)))
+                logF.append(log(fn))
+            }
+        }
+
+        // Step 3: α1 = slope of log(F(n)) vs log(n)
+        guard logN.count >= 3 else { return }
+
+        let n = Double(logN.count)
+        let sumX = logN.reduce(0, +)
+        let sumY = logF.reduce(0, +)
+        let sumXY = zip(logN, logF).map { $0 * $1 }.reduce(0, +)
+        let sumX2 = logN.map { $0 * $0 }.reduce(0, +)
+
+        let alpha = (n * sumXY - sumX * sumY) / (n * sumX2 - sumX * sumX)
+
+        DispatchQueue.main.async {
+            self.dfaAlpha1 = round(alpha * 100) / 100
+        }
+    }
+
+    // MARK: - Cognitive Readiness v2 (Research-Backed Composite)
+    //
+    // Composite: LnRMSSD (30%) + SDNN (30%) + Sleep quality (25%) + DFA α1 (15%)
+    // (Thayer 2022 meta-analysis: HRV→exec function r=0.19; Poole 2018: SDNN best predictor)
+    // Bands: Green (80-100), Yellow (50-79), Red (0-49)
+
+    func updateReadiness() {
+        guard !baselineRMSSD.isEmpty else {
+            readiness = .unknown
+            return
+        }
+
+        // --- Legacy readiness (simple LnRMSSD deviation) ---
+        let baselineLn = baselineRMSSD.map { $0 > 0 ? log($0) : 0 }
+        let meanLn = baselineLn.reduce(0, +) / Double(baselineLn.count)
+        let varianceLn = baselineLn.map { ($0 - meanLn) * ($0 - meanLn) }.reduce(0, +) / Double(baselineLn.count)
+        let sdLn = sqrt(varianceLn)
+        let deviation = (lnRMSSD - meanLn) / max(sdLn, 0.01)
+
+        if deviation >= -0.5 {
+            readiness = .green
+        } else if deviation >= -1.0 {
+            readiness = .yellow
+        } else {
+            readiness = .red
+        }
+
+        // --- Cognitive Capacity v2 (0-100 composite) ---
+
+        // 1. LnRMSSD component (30%): z-score mapped to 0-100
+        let rmssdScore = max(0, min(100, 50 + deviation * 25))
+
+        // 2. SDNN component (30%): ratio to baseline, capped at 150%
+        let baselineSDNN = sdnnHistory.isEmpty ? baselineHRV : (sdnnHistory.reduce(0, +) / Double(sdnnHistory.count))
+        let sdnnRatio = baselineSDNN > 0 ? min(sdnn / baselineSDNN, 1.5) : 1.0
+        let sdnnScore = min(sdnnRatio * 100, 100) * (sdnn > 0 ? 1.0 : 0.0)
+
+        // 3. Sleep quality component (25%)
+        let sleepComp: Double
+        if sleepDurationHours >= 7 {
+            sleepComp = min(90 + sleepEfficiency * 0.1, 100)
+        } else if sleepDurationHours >= 5.5 {
+            sleepComp = 50 + (sleepDurationHours - 5.5) / 1.5 * 40
+        } else if sleepDurationHours > 0 {
+            sleepComp = max(sleepDurationHours / 5.5 * 50, 10)
+        } else {
+            sleepComp = 50  // no data — neutral
+        }
+
+        // 4. DFA α1 component (15%): healthy resting ≈ 1.0
+        let dfaComp: Double
+        if dfaAlpha1 > 0 {
+            if dfaAlpha1 >= 0.9 && dfaAlpha1 <= 1.2 {
+                dfaComp = 100  // healthy fractal
+            } else if dfaAlpha1 >= 0.75 {
+                dfaComp = 60 + (dfaAlpha1 - 0.75) / 0.15 * 40
+            } else {
+                dfaComp = max(dfaAlpha1 / 0.75 * 60, 0)  // stressed/overreaching
+            }
+        } else {
+            dfaComp = 50  // no data — neutral
+        }
+
+        let capacity = rmssdScore * 0.30 + sdnnScore * 0.30 + sleepComp * 0.25 + dfaComp * 0.15
+
+        DispatchQueue.main.async {
+            self.cognitiveCapacity = round(capacity)
+            if capacity >= 80 {
+                self.cognitiveLabel = "Full"
+            } else if capacity >= 50 {
+                self.cognitiveLabel = "Reduced"
+            } else {
+                self.cognitiveLabel = "Low"
+            }
+        }
+    }
+
+    // MARK: - Respiratory Rate (RSA Extraction)
+    //
+    // Research: Lomb-Scargle periodogram on RR intervals.
+    // Best during sleep. Window: 60s. Reject if SNR < 2.5 or rate outside 8-25 bpm.
+    // Using simplified FFT approach with Accelerate framework.
+
+    func computeRespiratoryRate() {
+        guard rrBuffer.count >= 30 else { return }
+
+        // Use last 60 seconds of RR intervals
+        let window = Array(rrBuffer.suffix(60))
+        guard window.count >= 20 else { return }
+
+        // Interpolate RR intervals to 4 Hz evenly-sampled signal
+        let totalDuration = window.reduce(0, +) / 1000.0  // convert ms to seconds
+        let sampleRate: Double = 4.0
+        let numSamples = Int(totalDuration * sampleRate)
+        guard numSamples >= 16 else { return }
+
+        // Create cumulative time array
+        var cumTime: [Double] = [0]
+        for rr in window {
+            cumTime.append(cumTime.last! + rr / 1000.0)
+        }
+
+        // Linear interpolation to evenly-sampled signal
+        var interpolated = [Double](repeating: 0, count: numSamples)
+        for i in 0..<numSamples {
+            let t = Double(i) / sampleRate
+            // Find bracketing RR values
+            var j = 0
+            while j < cumTime.count - 1 && cumTime[j + 1] < t { j += 1 }
+            if j < window.count {
+                interpolated[i] = window[j]
+            }
+        }
+
+        // Remove mean
+        let mean = interpolated.reduce(0, +) / Double(interpolated.count)
+        interpolated = interpolated.map { $0 - mean }
+
+        // Simple peak-frequency detection via autocorrelation
+        // Look for peaks in the respiratory band (0.15-0.4 Hz = 9-24 bpm)
+        let minLag = Int(sampleRate / 0.4)  // 0.4 Hz upper bound
+        let maxLag = Int(sampleRate / 0.15) // 0.15 Hz lower bound
+
+        guard maxLag < interpolated.count else { return }
+
+        var bestLag = minLag
+        var bestCorr: Double = -1
+
+        for lag in minLag...min(maxLag, interpolated.count - 1) {
+            var corr: Double = 0
+            var count = 0
+            for i in 0..<(interpolated.count - lag) {
+                corr += interpolated[i] * interpolated[i + lag]
+                count += 1
+            }
+            if count > 0 {
+                corr /= Double(count)
+                if corr > bestCorr {
+                    bestCorr = corr
+                    bestLag = lag
+                }
+            }
+        }
+
+        // Convert lag to frequency to breaths per minute
+        let freq = sampleRate / Double(bestLag)
+        let bpm = freq * 60.0
+
+        // Quality gate: 8-25 bpm, and autocorrelation must be positive
+        if bpm >= 8 && bpm <= 25 && bestCorr > 0 {
+            DispatchQueue.main.async {
+                self.respiratoryRate = bpm
+            }
+        }
+    }
+
+    // MARK: - Poincaré SD1/SD2 (Finding 1.1 — Autonomic Balance)
+    // SD1 = short-term parasympathetic (beat-to-beat), correlates with RMSSD
+    // SD2 = long-term sympathovagal balance
+    // SD2/SD1 ratio: high = sympathetic dominant, low = parasympathetic dominant
+
+    func computePoincaré() {
+        let window = Array(rrBuffer.suffix(rmssdWindowSize))
+        guard window.count >= 10 else { return }
+
+        // SDSD = standard deviation of successive differences
+        var diffs = [Double]()
+        for i in 1..<window.count {
+            diffs.append(window[i] - window[i - 1])
+        }
+        let meanDiff = diffs.reduce(0, +) / Double(diffs.count)
+        let sdsd = sqrt(diffs.map { ($0 - meanDiff) * ($0 - meanDiff) }.reduce(0, +) / Double(diffs.count))
+
+        // SDNN for SD2 computation
+        let meanRR = window.reduce(0, +) / Double(window.count)
+        let sdnnVal = sqrt(window.map { ($0 - meanRR) * ($0 - meanRR) }.reduce(0, +) / Double(window.count))
+
+        // SD1 = sqrt(0.5 * SDSD²)
+        let sd1 = sqrt(0.5 * sdsd * sdsd)
+        // SD2 = sqrt(2 * SDNN² - 0.5 * SDSD²)
+        let sd2Squared = 2 * sdnnVal * sdnnVal - 0.5 * sdsd * sdsd
+        let sd2 = sd2Squared > 0 ? sqrt(sd2Squared) : 0
+
+        DispatchQueue.main.async {
+            self.poincaréSD1 = round(sd1 * 10) / 10
+            self.poincaréSD2 = round(sd2 * 10) / 10
+            self.poincaréRatio = sd1 > 0 ? round((sd2 / sd1) * 100) / 100 : 0
+        }
+    }
+
+    // MARK: - Whoop-Style HRV Score (0-100)
+
+    var hrvScore: Double {
+        guard currentRMSSD > 0 else { return 0 }
+        return min((log(currentRMSSD) / 6.5) * 100, 100)
+    }
+
+    // MARK: - Baevsky Stress Index (P3 — stolen from openwhoop community)
+    // SI = AMo / (2 × Mo × MxDMn). 0-500: <100 calm, 100-300 normal, >300 stressed.
+    // Independent of HRV mean — captures sympathetic activation HRV misses.
+    func computeBaevskyStress() {
+        let window = Array(rrBuffer.suffix(300))
+        guard window.count >= 100 else { return }
+        let rrSec = window.map { $0 / 1000.0 }
+        let sorted = rrSec.sorted()
+        let p05 = sorted[Int(Double(sorted.count) * 0.05)]
+        let p95 = sorted[min(Int(Double(sorted.count) * 0.95), sorted.count - 1)]
+        let mxdmn = max(p95 - p05, 0.001)
+        let binWidth = 0.050
+        let minBin = floor(p05 / binWidth) * binWidth
+        let numBins = max(Int(ceil((p95 - minBin) / binWidth)) + 1, 1)
+        var bins = [Int](repeating: 0, count: numBins)
+        for rr in rrSec {
+            if rr < p05 || rr > p95 { continue }
+            let idx = min(max(Int((rr - minBin) / binWidth), 0), numBins - 1)
+            bins[idx] += 1
+        }
+        guard let peakIdx = bins.indices.max(by: { bins[$0] < bins[$1] }) else { return }
+        let mo = minBin + (Double(peakIdx) + 0.5) * binWidth
+        let modeCount = bins[peakIdx]
+        let totalCounted = bins.reduce(0, +)
+        guard totalCounted > 0 else { return }
+        let amoPct = Double(modeCount) / Double(totalCounted) * 100.0
+        let si = amoPct / (2.0 * mo * mxdmn)
+        let clipped = max(0, min(si, 999))
+        let label: String
+        if clipped < 100 { label = "Calm" }
+        else if clipped < 300 { label = "Normal" }
+        else { label = "Stressed" }
+        DispatchQueue.main.async {
+            self.baevskyStress = round(clipped)
+            self.baevskyStressLabel = label
+        }
+    }
+}

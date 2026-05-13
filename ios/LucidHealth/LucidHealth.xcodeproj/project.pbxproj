@@ -1,0 +1,822 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {
+	};
+	objectVersion = 56;
+	objects = {
+
+/* Begin PBXBuildFile section */
+		LH000001 /* LucidHealthApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = LH100001; };
+		LH000002 /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = LH100002; };
+		LH000003 /* BLEManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = LH100003; };
+		LH000004 /* WhoopProtocol.swift in Sources */ = {isa = PBXBuildFile; fileRef = LH100004; };
+		LH000005 /* SupabaseClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = LH100005; };
+		LH000006 /* HealthEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = LH100006; };
+		LH000007 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = LH100007; };
+		LH000008 /* ActivityDetector.swift in Sources */ = {isa = PBXBuildFile; fileRef = LH100008; };
+		LH000009 /* SharedHealthData.swift in Sources */ = {isa = PBXBuildFile; fileRef = LH100009; };
+		LH00000A /* LucidActivityAttributes.swift in Sources */ = {isa = PBXBuildFile; fileRef = LH10000A; };
+		LH00000B /* DesignSystem.swift in Sources */ = {isa = PBXBuildFile; fileRef = LH10000B; };
+		LH00000C /* HRVEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = LH10000C; };
+		LH00000D /* SleepEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = LH10000D; };
+		LH00000E /* RecoveryEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = LH10000E; };
+		LH00000F /* IllnessDetector.swift in Sources */ = {isa = PBXBuildFile; fileRef = LH10000F; };
+		LH000011 /* AppMode.swift in Sources */ = {isa = PBXBuildFile; fileRef = LH100011; };
+		LH000012 /* ModeBanner.swift in Sources */ = {isa = PBXBuildFile; fileRef = LH100012; };
+		LH000013 /* RecoveryOverlay.swift in Sources */ = {isa = PBXBuildFile; fileRef = LH100013; };
+		LH000014 /* RecoveryOverlayBanner.swift in Sources */ = {isa = PBXBuildFile; fileRef = LH100014; };
+		LH000015 /* BuildInfo.swift in Sources */ = {isa = PBXBuildFile; fileRef = LH100015; };
+		LH000016 /* NotificationListener.swift in Sources */ = {isa = PBXBuildFile; fileRef = LH100016; };
+		LH000017 /* ActivityCatalog.swift in Sources */ = {isa = PBXBuildFile; fileRef = LH100017; };
+		LH000018 /* RecoveryCopy.swift in Sources */ = {isa = PBXBuildFile; fileRef = LH100018; };
+		LH000019 /* DayState.swift in Sources */ = {isa = PBXBuildFile; fileRef = LH100019; };
+		LH00001A /* FoodEntry.swift in Sources */ = {isa = PBXBuildFile; fileRef = LH10001A; };
+		LH00001B /* QuickLogItem.swift in Sources */ = {isa = PBXBuildFile; fileRef = LH10001B; };
+		LH000040 /* HealthModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = LH100040; };
+		LH00001C /* GeminiClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = LH10001C; };
+		LH00001D /* OpenFoodFactsClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = LH10001D; };
+		LH00001E /* lucid-warm.caf in Resources */ = {isa = PBXBuildFile; fileRef = LH10001E; };
+		LH00001F /* lucid-halo.caf in Resources */ = {isa = PBXBuildFile; fileRef = LH10001F; };
+		/* Views */
+		LH000020 /* RootTabView.swift in Sources */ = {isa = PBXBuildFile; fileRef = LH100022; };
+		LH000021 /* TodayView.swift in Sources */ = {isa = PBXBuildFile; fileRef = LH100023; };
+		LH000022 /* HealthView.swift in Sources */ = {isa = PBXBuildFile; fileRef = LH100024; };
+		LH000023 /* FoodView.swift in Sources */ = {isa = PBXBuildFile; fileRef = LH100025; };
+		LH000024 /* InsightsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = LH100026; };
+		LH000025 /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = LH100027; };
+		LH000026 /* CameraView.swift in Sources */ = {isa = PBXBuildFile; fileRef = LH100028; };
+		LH000027 /* ReviewView.swift in Sources */ = {isa = PBXBuildFile; fileRef = LH100029; };
+		LH000028 /* BarcodeScannerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = LH10002A; };
+		LH000029 /* BarcodeResultView.swift in Sources */ = {isa = PBXBuildFile; fileRef = LH10002B; };
+		/* Views/Components */
+		LH00002A /* BLEStatusDot.swift in Sources */ = {isa = PBXBuildFile; fileRef = LH10002C; };
+		LH00002B /* RecoveryRingHero.swift in Sources */ = {isa = PBXBuildFile; fileRef = LH10002D; };
+		LH00002C /* BiometricStatRow.swift in Sources */ = {isa = PBXBuildFile; fileRef = LH10002E; };
+		LH00002D /* QuickLogPill.swift in Sources */ = {isa = PBXBuildFile; fileRef = LH10002F; };
+		LH00002E /* QuickLogRow.swift in Sources */ = {isa = PBXBuildFile; fileRef = LH100030; };
+		LH00002F /* MealCard.swift in Sources */ = {isa = PBXBuildFile; fileRef = LH100031; };
+		LH000030 /* LastMealCard.swift in Sources */ = {isa = PBXBuildFile; fileRef = LH100032; };
+		LH000031 /* PatternNote.swift in Sources */ = {isa = PBXBuildFile; fileRef = LH100033; };
+		LH000032 /* FABButton.swift in Sources */ = {isa = PBXBuildFile; fileRef = LH100034; };
+		LH000033 /* FABMenu.swift in Sources */ = {isa = PBXBuildFile; fileRef = LH100035; };
+		LH000034 /* InsightCard.swift in Sources */ = {isa = PBXBuildFile; fileRef = LH100036; };
+		LH000035 /* LoadingState.swift in Sources */ = {isa = PBXBuildFile; fileRef = LH100037; };
+		LH000036 /* ErrorState.swift in Sources */ = {isa = PBXBuildFile; fileRef = LH100038; };
+		LH000041 /* LiveBiometricsPanel.swift in Sources */ = {isa = PBXBuildFile; fileRef = LH100041; };
+		LH000042 /* RecoveryBreakdownBar.swift in Sources */ = {isa = PBXBuildFile; fileRef = LH100042; };
+		LH000043 /* StrainZonesBar.swift in Sources */ = {isa = PBXBuildFile; fileRef = LH100043; };
+		LH000044 /* IllnessRiskGauge.swift in Sources */ = {isa = PBXBuildFile; fileRef = LH100044; };
+		LH000045 /* HRVSparkline.swift in Sources */ = {isa = PBXBuildFile; fileRef = LH100045; };
+		LH000046 /* TimeOfDayHero.swift in Sources */ = {isa = PBXBuildFile; fileRef = LH100046; };
+		LH000060 /* CategoryDot.swift in Sources */ = {isa = PBXBuildFile; fileRef = LH100060; };
+		LH000061 /* PillTabBar.swift in Sources */ = {isa = PBXBuildFile; fileRef = LH100061; };
+		LH000062 /* SettingsGearButton.swift in Sources */ = {isa = PBXBuildFile; fileRef = LH100062; };
+		LH000063 /* StatusChip.swift in Sources */ = {isa = PBXBuildFile; fileRef = LH100063; };
+		LH000064 /* AmbientLiveDot.swift in Sources */ = {isa = PBXBuildFile; fileRef = LH100064; };
+		LH000065 /* HeroRecoveryRing.swift in Sources */ = {isa = PBXBuildFile; fileRef = LH100065; };
+		LH000066 /* HRVRingMini.swift in Sources */ = {isa = PBXBuildFile; fileRef = LH100066; };
+		LH000067 /* SparklineChart.swift in Sources */ = {isa = PBXBuildFile; fileRef = LH100067; };
+		LH000068 /* FormatDiversityHint.swift in Sources */ = {isa = PBXBuildFile; fileRef = LH100068; };
+		LH000069 /* ActivityView.swift in Sources */ = {isa = PBXBuildFile; fileRef = LH100069; };
+		LH00006A /* ActivityEditSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = LH10006A; };
+		LH00006B /* SleepAdjustSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = LH10006B; };
+		LH00006C /* QuickTagSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = LH10006C; };
+		LH00006D /* SwipeActionsCard.swift in Sources */ = {isa = PBXBuildFile; fileRef = LH10006D; };
+		LH00006E /* EditFoodEntrySheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = LH10006E; };
+		LH00006F /* QuickLogHistory.swift in Sources */ = {isa = PBXBuildFile; fileRef = LH10006F; };
+		LH000074 /* LucidLog.swift in Sources */ = {isa = PBXBuildFile; fileRef = LH100074; };
+		LH000075 /* LogViewerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = LH100075; };
+		LH000070 /* ExperimentalFeaturesService.swift in Sources */ = {isa = PBXBuildFile; fileRef = LH100070; };
+		LH000071 /* ExperimentalCards.swift in Sources */ = {isa = PBXBuildFile; fileRef = LH100071; };
+		LH000072 /* CoherenceDrillView.swift in Sources */ = {isa = PBXBuildFile; fileRef = LH100072; };
+		LH000073 /* ContextTiles.swift in Sources */ = {isa = PBXBuildFile; fileRef = LH100073; };
+		LH000076 /* DailyInsightsStrip.swift in Sources */ = {isa = PBXBuildFile; fileRef = LH100076; };
+		LH000077 /* ManualFoodEntrySheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = LH100077; };
+		LH000078 /* HermesViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = LH100078; };
+		/* Widget extension build files */
+		LHW00001 /* LucidWidgets.swift in Sources */ = {isa = PBXBuildFile; fileRef = LHW10001; };
+		LHW00002 /* LucidLiveActivity.swift in Sources */ = {isa = PBXBuildFile; fileRef = LHW10002; };
+		LHW00003 /* LucidWidgetBundle.swift in Sources */ = {isa = PBXBuildFile; fileRef = LHW10003; };
+		LHW00004 /* SharedHealthData.swift in Sources */ = {isa = PBXBuildFile; fileRef = LH100009; };
+		LHW00005 /* LucidActivityAttributes.swift in Sources */ = {isa = PBXBuildFile; fileRef = LH10000A; };
+		LHW00007 /* LucidLog.swift in Sources */ = {isa = PBXBuildFile; fileRef = LH100074; };
+		/* Widget extension embed */
+		LHW00006 /* LucidHealthWidgets.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = LHW30001; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
+/* End PBXBuildFile section */
+
+/* Begin PBXContainerItemProxy section */
+		LHW40001 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = LH900001 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = LHW60001;
+			remoteInfo = LucidHealthWidgets;
+		};
+/* End PBXContainerItemProxy section */
+
+/* Begin PBXCopyFilesBuildPhase section */
+		LHW50001 /* Embed Foundation Extensions */ = {
+			isa = PBXCopyFilesBuildPhase;
+			buildActionMask = 2147483647;
+			dstPath = "";
+			dstSubfolderSpec = 13;
+			files = (
+				LHW00006 /* LucidHealthWidgets.appex in Embed Foundation Extensions */,
+			);
+			name = "Embed Foundation Extensions";
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXCopyFilesBuildPhase section */
+
+/* Begin PBXFileReference section */
+		LH100001 /* LucidHealthApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LucidHealthApp.swift; sourceTree = "<group>"; };
+		LH100002 /* ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
+		LH100003 /* BLEManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BLEManager.swift; sourceTree = "<group>"; };
+		LH100004 /* WhoopProtocol.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WhoopProtocol.swift; sourceTree = "<group>"; };
+		LH100005 /* SupabaseClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Services/SupabaseClient.swift; sourceTree = "<group>"; };
+		LH100006 /* HealthEngine.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HealthEngine.swift; sourceTree = "<group>"; };
+		LH100007 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
+		LH100008 /* ActivityDetector.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ActivityDetector.swift; sourceTree = "<group>"; };
+		LH100009 /* SharedHealthData.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SharedHealthData.swift; sourceTree = "<group>"; };
+		LH10000A /* LucidActivityAttributes.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LucidActivityAttributes.swift; sourceTree = "<group>"; };
+		LH10000B /* DesignSystem.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DesignSystem.swift; sourceTree = "<group>"; };
+		LH10000C /* HRVEngine.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HRVEngine.swift; sourceTree = "<group>"; };
+		LH10000D /* SleepEngine.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SleepEngine.swift; sourceTree = "<group>"; };
+		LH10000E /* RecoveryEngine.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RecoveryEngine.swift; sourceTree = "<group>"; };
+		LH10000F /* IllnessDetector.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IllnessDetector.swift; sourceTree = "<group>"; };
+		LH100011 /* AppMode.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppMode.swift; sourceTree = "<group>"; };
+		LH100012 /* ModeBanner.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ModeBanner.swift; sourceTree = "<group>"; };
+		LH100013 /* RecoveryOverlay.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RecoveryOverlay.swift; sourceTree = "<group>"; };
+		LH100014 /* RecoveryOverlayBanner.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RecoveryOverlayBanner.swift; sourceTree = "<group>"; };
+		LH100015 /* BuildInfo.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BuildInfo.swift; sourceTree = "<group>"; };
+		LH100016 /* NotificationListener.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NotificationListener.swift; sourceTree = "<group>"; };
+		LH100017 /* ActivityCatalog.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ActivityCatalog.swift; sourceTree = "<group>"; };
+		LH100018 /* RecoveryCopy.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RecoveryCopy.swift; sourceTree = "<group>"; };
+		LH100019 /* DayState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DayState.swift; sourceTree = "<group>"; };
+		LH10001A /* FoodEntry.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Models/FoodEntry.swift; sourceTree = "<group>"; };
+		LH10001B /* QuickLogItem.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Models/QuickLogItem.swift; sourceTree = "<group>"; };
+		LH100040 /* HealthModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Models/HealthModels.swift; sourceTree = "<group>"; };
+		LH10001C /* GeminiClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Services/GeminiClient.swift; sourceTree = "<group>"; };
+		LH10001D /* OpenFoodFactsClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Services/OpenFoodFactsClient.swift; sourceTree = "<group>"; };
+		LH10001E /* lucid-warm.caf */ = {isa = PBXFileReference; lastKnownFileType = audio.caf; path = "lucid-warm.caf"; sourceTree = "<group>"; };
+		LH10001F /* lucid-halo.caf */ = {isa = PBXFileReference; lastKnownFileType = audio.caf; path = "lucid-halo.caf"; sourceTree = "<group>"; };
+		LH100020 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
+		LH100021 /* LucidHealth.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = LucidHealth.entitlements; sourceTree = "<group>"; };
+		/* Views */
+		LH100022 /* RootTabView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RootTabView.swift; sourceTree = "<group>"; };
+		LH100023 /* TodayView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TodayView.swift; sourceTree = "<group>"; };
+		LH100024 /* HealthView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HealthView.swift; sourceTree = "<group>"; };
+		LH100025 /* FoodView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FoodView.swift; sourceTree = "<group>"; };
+		LH100026 /* InsightsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InsightsView.swift; sourceTree = "<group>"; };
+		LH100027 /* SettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsView.swift; sourceTree = "<group>"; };
+		LH100028 /* CameraView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CameraView.swift; sourceTree = "<group>"; };
+		LH100029 /* ReviewView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReviewView.swift; sourceTree = "<group>"; };
+		LH10002A /* BarcodeScannerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BarcodeScannerView.swift; sourceTree = "<group>"; };
+		LH10002B /* BarcodeResultView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BarcodeResultView.swift; sourceTree = "<group>"; };
+		/* Views/Components */
+		LH10002C /* BLEStatusDot.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BLEStatusDot.swift; sourceTree = "<group>"; };
+		LH10002D /* RecoveryRingHero.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RecoveryRingHero.swift; sourceTree = "<group>"; };
+		LH10002E /* BiometricStatRow.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BiometricStatRow.swift; sourceTree = "<group>"; };
+		LH10002F /* QuickLogPill.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QuickLogPill.swift; sourceTree = "<group>"; };
+		LH100030 /* QuickLogRow.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QuickLogRow.swift; sourceTree = "<group>"; };
+		LH100031 /* MealCard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MealCard.swift; sourceTree = "<group>"; };
+		LH100032 /* LastMealCard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LastMealCard.swift; sourceTree = "<group>"; };
+		LH100033 /* PatternNote.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PatternNote.swift; sourceTree = "<group>"; };
+		LH100034 /* FABButton.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FABButton.swift; sourceTree = "<group>"; };
+		LH100035 /* FABMenu.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FABMenu.swift; sourceTree = "<group>"; };
+		LH100036 /* InsightCard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InsightCard.swift; sourceTree = "<group>"; };
+		LH100037 /* LoadingState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LoadingState.swift; sourceTree = "<group>"; };
+		LH100038 /* ErrorState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ErrorState.swift; sourceTree = "<group>"; };
+		LH100041 /* LiveBiometricsPanel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LiveBiometricsPanel.swift; sourceTree = "<group>"; };
+		LH100042 /* RecoveryBreakdownBar.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RecoveryBreakdownBar.swift; sourceTree = "<group>"; };
+		LH100043 /* StrainZonesBar.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StrainZonesBar.swift; sourceTree = "<group>"; };
+		LH100044 /* IllnessRiskGauge.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IllnessRiskGauge.swift; sourceTree = "<group>"; };
+		LH100045 /* HRVSparkline.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HRVSparkline.swift; sourceTree = "<group>"; };
+		LH100046 /* TimeOfDayHero.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TimeOfDayHero.swift; sourceTree = "<group>"; };
+		LH100060 /* CategoryDot.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CategoryDot.swift; sourceTree = "<group>"; };
+		LH100061 /* PillTabBar.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PillTabBar.swift; sourceTree = "<group>"; };
+		LH100062 /* SettingsGearButton.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsGearButton.swift; sourceTree = "<group>"; };
+		LH100063 /* StatusChip.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StatusChip.swift; sourceTree = "<group>"; };
+		LH100064 /* AmbientLiveDot.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AmbientLiveDot.swift; sourceTree = "<group>"; };
+		LH100065 /* HeroRecoveryRing.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HeroRecoveryRing.swift; sourceTree = "<group>"; };
+		LH100066 /* HRVRingMini.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HRVRingMini.swift; sourceTree = "<group>"; };
+		LH100067 /* SparklineChart.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SparklineChart.swift; sourceTree = "<group>"; };
+		LH100068 /* FormatDiversityHint.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FormatDiversityHint.swift; sourceTree = "<group>"; };
+		LH100069 /* ActivityView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ActivityView.swift; sourceTree = "<group>"; };
+		LH10006A /* ActivityEditSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ActivityEditSheet.swift; sourceTree = "<group>"; };
+		LH10006B /* SleepAdjustSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SleepAdjustSheet.swift; sourceTree = "<group>"; };
+		LH10006C /* QuickTagSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QuickTagSheet.swift; sourceTree = "<group>"; };
+		LH10006D /* SwipeActionsCard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SwipeActionsCard.swift; sourceTree = "<group>"; };
+		LH10006E /* EditFoodEntrySheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EditFoodEntrySheet.swift; sourceTree = "<group>"; };
+		LH10006F /* QuickLogHistory.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Models/QuickLogHistory.swift; sourceTree = "<group>"; };
+		LH100074 /* LucidLog.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Models/LucidLog.swift; sourceTree = "<group>"; };
+		LH100075 /* LogViewerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LogViewerView.swift; sourceTree = "<group>"; };
+		LH100070 /* ExperimentalFeaturesService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Services/ExperimentalFeaturesService.swift; sourceTree = "<group>"; };
+		LH100071 /* ExperimentalCards.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ExperimentalCards.swift; sourceTree = "<group>"; };
+		LH100072 /* CoherenceDrillView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CoherenceDrillView.swift; sourceTree = "<group>"; };
+		LH100073 /* ContextTiles.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContextTiles.swift; sourceTree = "<group>"; };
+		LH100076 /* DailyInsightsStrip.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DailyInsightsStrip.swift; sourceTree = "<group>"; };
+		LH100077 /* ManualFoodEntrySheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ManualFoodEntrySheet.swift; sourceTree = "<group>"; };
+		LH100078 /* HermesViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HermesViews.swift; sourceTree = "<group>"; };
+		LH300001 /* LucidHealth.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = LucidHealth.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		/* Widget extension files */
+		LHW10001 /* LucidWidgets.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LucidWidgets.swift; sourceTree = "<group>"; };
+		LHW10002 /* LucidLiveActivity.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LucidLiveActivity.swift; sourceTree = "<group>"; };
+		LHW10003 /* LucidWidgetBundle.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LucidWidgetBundle.swift; sourceTree = "<group>"; };
+		LHW10004 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
+		LHW10005 /* LucidHealthWidgets.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = LucidHealthWidgets.entitlements; sourceTree = "<group>"; };
+		LHW30001 /* LucidHealthWidgets.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = LucidHealthWidgets.appex; sourceTree = BUILT_PRODUCTS_DIR; };
+/* End PBXFileReference section */
+
+/* Begin PBXFrameworksBuildPhase section */
+		LH400001 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		LHW40002 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXFrameworksBuildPhase section */
+
+/* Begin PBXGroup section */
+		LH500001 = {
+			isa = PBXGroup;
+			children = (
+				LH500002 /* LucidHealth */,
+				LHW50002 /* LucidHealthWidgets */,
+				LH500003 /* Products */,
+			);
+			sourceTree = "<group>";
+		};
+		LH500002 /* LucidHealth */ = {
+			isa = PBXGroup;
+			children = (
+				LH100001 /* LucidHealthApp.swift */,
+				LH100002 /* ContentView.swift */,
+				LH100003 /* BLEManager.swift */,
+				LH100004 /* WhoopProtocol.swift */,
+				LH100005 /* SupabaseClient.swift */,
+				LH100006 /* HealthEngine.swift */,
+				LH10000C /* HRVEngine.swift */,
+				LH10000D /* SleepEngine.swift */,
+				LH10000E /* RecoveryEngine.swift */,
+				LH10000F /* IllnessDetector.swift */,
+				LH100008 /* ActivityDetector.swift */,
+				LH100011 /* AppMode.swift */,
+				LH100012 /* ModeBanner.swift */,
+				LH100013 /* RecoveryOverlay.swift */,
+				LH100014 /* RecoveryOverlayBanner.swift */,
+				LH100015 /* BuildInfo.swift */,
+				LH10000B /* DesignSystem.swift */,
+				LH100009 /* SharedHealthData.swift */,
+				LH10000A /* LucidActivityAttributes.swift */,
+				LH100016 /* NotificationListener.swift */,
+				LH100017 /* ActivityCatalog.swift */,
+				LH100018 /* RecoveryCopy.swift */,
+				LH100019 /* DayState.swift */,
+				LH10001A /* FoodEntry.swift */,
+				LH10001B /* QuickLogItem.swift */,
+				LH10006F /* QuickLogHistory.swift */,
+				LH100074 /* LucidLog.swift */,
+				LH100040 /* HealthModels.swift */,
+				LH10001C /* GeminiClient.swift */,
+				LH10001D /* OpenFoodFactsClient.swift */,
+				LH100070 /* ExperimentalFeaturesService.swift */,
+				LH10001E /* lucid-warm.caf */,
+				LH10001F /* lucid-halo.caf */,
+				LH100007 /* Assets.xcassets */,
+				LH100020 /* Info.plist */,
+				LH100021 /* LucidHealth.entitlements */,
+				LH500004 /* Views */,
+			);
+			path = LucidHealth;
+			sourceTree = "<group>";
+		};
+		LH500004 /* Views */ = {
+			isa = PBXGroup;
+			children = (
+				LH100022 /* RootTabView.swift */,
+				LH100023 /* TodayView.swift */,
+				LH100024 /* HealthView.swift */,
+				LH100025 /* FoodView.swift */,
+				LH100026 /* InsightsView.swift */,
+				LH100027 /* SettingsView.swift */,
+				LH100028 /* CameraView.swift */,
+				LH100029 /* ReviewView.swift */,
+				LH10002A /* BarcodeScannerView.swift */,
+				LH10002B /* BarcodeResultView.swift */,
+				LH100069 /* ActivityView.swift */,
+				LH10006A /* ActivityEditSheet.swift */,
+				LH10006B /* SleepAdjustSheet.swift */,
+				LH10006E /* EditFoodEntrySheet.swift */,
+				LH100071 /* ExperimentalCards.swift */,
+				LH100072 /* CoherenceDrillView.swift */,
+				LH100073 /* ContextTiles.swift */,
+				LH100076 /* DailyInsightsStrip.swift */,
+				LH100075 /* LogViewerView.swift */,
+				LH100077 /* ManualFoodEntrySheet.swift */,
+				LH100078 /* HermesViews.swift */,
+				LH500005 /* Components */,
+			);
+			path = Views;
+			sourceTree = "<group>";
+		};
+		LH500005 /* Components */ = {
+			isa = PBXGroup;
+			children = (
+				LH10002C /* BLEStatusDot.swift */,
+				LH10002D /* RecoveryRingHero.swift */,
+				LH10002E /* BiometricStatRow.swift */,
+				LH10002F /* QuickLogPill.swift */,
+				LH100030 /* QuickLogRow.swift */,
+				LH100031 /* MealCard.swift */,
+				LH100032 /* LastMealCard.swift */,
+				LH100033 /* PatternNote.swift */,
+				LH100034 /* FABButton.swift */,
+				LH100035 /* FABMenu.swift */,
+				LH100036 /* InsightCard.swift */,
+				LH100037 /* LoadingState.swift */,
+				LH100038 /* ErrorState.swift */,
+				LH100041 /* LiveBiometricsPanel.swift */,
+				LH100042 /* RecoveryBreakdownBar.swift */,
+				LH100043 /* StrainZonesBar.swift */,
+				LH100044 /* IllnessRiskGauge.swift */,
+				LH100045 /* HRVSparkline.swift */,
+				LH100046 /* TimeOfDayHero.swift */,
+				LH100060 /* CategoryDot.swift */,
+				LH100061 /* PillTabBar.swift */,
+				LH100062 /* SettingsGearButton.swift */,
+				LH100063 /* StatusChip.swift */,
+				LH100064 /* AmbientLiveDot.swift */,
+				LH100065 /* HeroRecoveryRing.swift */,
+				LH100066 /* HRVRingMini.swift */,
+				LH100067 /* SparklineChart.swift */,
+				LH100068 /* FormatDiversityHint.swift */,
+				LH10006C /* QuickTagSheet.swift */,
+				LH10006D /* SwipeActionsCard.swift */,
+			);
+			path = Components;
+			sourceTree = "<group>";
+		};
+		LH500003 /* Products */ = {
+			isa = PBXGroup;
+			children = (
+				LH300001 /* LucidHealth.app */,
+				LHW30001 /* LucidHealthWidgets.appex */,
+			);
+			name = Products;
+			sourceTree = "<group>";
+		};
+		LHW50002 /* LucidHealthWidgets */ = {
+			isa = PBXGroup;
+			children = (
+				LHW10001 /* LucidWidgets.swift */,
+				LHW10002 /* LucidLiveActivity.swift */,
+				LHW10003 /* LucidWidgetBundle.swift */,
+				LHW10004 /* Info.plist */,
+				LHW10005 /* LucidHealthWidgets.entitlements */,
+			);
+			path = LucidHealthWidgets;
+			sourceTree = "<group>";
+		};
+/* End PBXGroup section */
+
+/* Begin PBXResourcesBuildPhase section */
+		LH400002 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				LH000007 /* Assets.xcassets in Resources */,
+				LH00001E /* lucid-warm.caf in Resources */,
+				LH00001F /* lucid-halo.caf in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		LHW40003 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXResourcesBuildPhase section */
+
+/* Begin PBXNativeTarget section */
+		LH600001 /* LucidHealth */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = LH800001 /* Build configuration list for PBXNativeTarget "LucidHealth" */;
+			buildPhases = (
+				LH700001 /* Sources */,
+				LH400001 /* Frameworks */,
+				LH400002 /* Resources */,
+				LHW50001 /* Embed Foundation Extensions */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				LHW40001A /* PBXTargetDependency */,
+			);
+			name = LucidHealth;
+			productName = LucidHealth;
+			productReference = LH300001 /* LucidHealth.app */;
+			productType = "com.apple.product-type.application";
+		};
+		LHW60001 /* LucidHealthWidgets */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = LHW80001 /* Build configuration list for PBXNativeTarget "LucidHealthWidgets" */;
+			buildPhases = (
+				LHW70001 /* Sources */,
+				LHW40002 /* Frameworks */,
+				LHW40003 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = LucidHealthWidgets;
+			productName = LucidHealthWidgets;
+			productReference = LHW30001 /* LucidHealthWidgets.appex */;
+			productType = "com.apple.product-type.app-extension";
+		};
+/* End PBXNativeTarget section */
+
+/* Begin PBXProject section */
+		LH900001 /* Project object */ = {
+			isa = PBXProject;
+			attributes = {
+				BuildIndependentTargetsInParallel = 1;
+				LastSwiftUpdateCheck = 1600;
+				LastUpgradeCheck = 1600;
+				TargetAttributes = {
+					LH600001 = {
+						CreatedOnToolsVersion = 16.0;
+					};
+					LHW60001 = {
+						CreatedOnToolsVersion = 16.0;
+					};
+				};
+			};
+			buildConfigurationList = LH800003 /* Build configuration list for PBXProject "LucidHealth" */;
+			compatibilityVersion = "Xcode 14.0";
+			developmentRegion = en;
+			hasScannedForEncodings = 0;
+			knownRegions = (
+				en,
+				Base,
+			);
+			mainGroup = LH500001;
+			productRefGroup = LH500003 /* Products */;
+			projectDirPath = "";
+			projectRoot = "";
+			targets = (
+				LH600001 /* LucidHealth */,
+				LHW60001 /* LucidHealthWidgets */,
+			);
+		};
+/* End PBXProject section */
+
+/* Begin PBXSourcesBuildPhase section */
+		LH700001 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				LH000001 /* LucidHealthApp.swift in Sources */,
+				LH000002 /* ContentView.swift in Sources */,
+				LH000003 /* BLEManager.swift in Sources */,
+				LH000004 /* WhoopProtocol.swift in Sources */,
+				LH000005 /* SupabaseClient.swift in Sources */,
+				LH000006 /* HealthEngine.swift in Sources */,
+				LH00000C /* HRVEngine.swift in Sources */,
+				LH00000D /* SleepEngine.swift in Sources */,
+				LH00000E /* RecoveryEngine.swift in Sources */,
+				LH00000F /* IllnessDetector.swift in Sources */,
+				LH000011 /* AppMode.swift in Sources */,
+				LH000012 /* ModeBanner.swift in Sources */,
+				LH000013 /* RecoveryOverlay.swift in Sources */,
+				LH000014 /* RecoveryOverlayBanner.swift in Sources */,
+				LH000015 /* BuildInfo.swift in Sources */,
+				LH000008 /* ActivityDetector.swift in Sources */,
+				LH00000B /* DesignSystem.swift in Sources */,
+				LH000009 /* SharedHealthData.swift in Sources */,
+				LH00000A /* LucidActivityAttributes.swift in Sources */,
+				LH000016 /* NotificationListener.swift in Sources */,
+				LH000017 /* ActivityCatalog.swift in Sources */,
+				LH000018 /* RecoveryCopy.swift in Sources */,
+				LH000019 /* DayState.swift in Sources */,
+				LH00001A /* FoodEntry.swift in Sources */,
+				LH00001B /* QuickLogItem.swift in Sources */,
+				LH00006F /* QuickLogHistory.swift in Sources */,
+				LH000074 /* LucidLog.swift in Sources */,
+				LH000075 /* LogViewerView.swift in Sources */,
+				LH000040 /* HealthModels.swift in Sources */,
+				LH00001C /* GeminiClient.swift in Sources */,
+				LH00001D /* OpenFoodFactsClient.swift in Sources */,
+				LH000020 /* RootTabView.swift in Sources */,
+				LH000021 /* TodayView.swift in Sources */,
+				LH000022 /* HealthView.swift in Sources */,
+				LH000023 /* FoodView.swift in Sources */,
+				LH000024 /* InsightsView.swift in Sources */,
+				LH000025 /* SettingsView.swift in Sources */,
+				LH000026 /* CameraView.swift in Sources */,
+				LH000027 /* ReviewView.swift in Sources */,
+				LH000028 /* BarcodeScannerView.swift in Sources */,
+				LH000029 /* BarcodeResultView.swift in Sources */,
+				LH00002A /* BLEStatusDot.swift in Sources */,
+				LH00002B /* RecoveryRingHero.swift in Sources */,
+				LH00002C /* BiometricStatRow.swift in Sources */,
+				LH00002D /* QuickLogPill.swift in Sources */,
+				LH00002E /* QuickLogRow.swift in Sources */,
+				LH00002F /* MealCard.swift in Sources */,
+				LH000030 /* LastMealCard.swift in Sources */,
+				LH000031 /* PatternNote.swift in Sources */,
+				LH000032 /* FABButton.swift in Sources */,
+				LH000033 /* FABMenu.swift in Sources */,
+				LH000034 /* InsightCard.swift in Sources */,
+				LH000035 /* LoadingState.swift in Sources */,
+				LH000036 /* ErrorState.swift in Sources */,
+				LH000041 /* LiveBiometricsPanel.swift in Sources */,
+				LH000042 /* RecoveryBreakdownBar.swift in Sources */,
+				LH000043 /* StrainZonesBar.swift in Sources */,
+				LH000044 /* IllnessRiskGauge.swift in Sources */,
+				LH000045 /* HRVSparkline.swift in Sources */,
+				LH000046 /* TimeOfDayHero.swift in Sources */,
+				LH000060 /* CategoryDot.swift in Sources */,
+				LH000061 /* PillTabBar.swift in Sources */,
+				LH000062 /* SettingsGearButton.swift in Sources */,
+				LH000063 /* StatusChip.swift in Sources */,
+				LH000064 /* AmbientLiveDot.swift in Sources */,
+				LH000065 /* HeroRecoveryRing.swift in Sources */,
+				LH000066 /* HRVRingMini.swift in Sources */,
+				LH000067 /* SparklineChart.swift in Sources */,
+				LH000068 /* FormatDiversityHint.swift in Sources */,
+				LH000069 /* ActivityView.swift in Sources */,
+				LH00006A /* ActivityEditSheet.swift in Sources */,
+				LH00006B /* SleepAdjustSheet.swift in Sources */,
+				LH00006C /* QuickTagSheet.swift in Sources */,
+				LH00006D /* SwipeActionsCard.swift in Sources */,
+				LH00006E /* EditFoodEntrySheet.swift in Sources */,
+				LH000070 /* ExperimentalFeaturesService.swift in Sources */,
+				LH000071 /* ExperimentalCards.swift in Sources */,
+				LH000072 /* CoherenceDrillView.swift in Sources */,
+				LH000073 /* ContextTiles.swift in Sources */,
+				LH000076 /* DailyInsightsStrip.swift in Sources */,
+				LH000077 /* ManualFoodEntrySheet.swift in Sources */,
+				LH000078 /* HermesViews.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		LHW70001 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				LHW00001 /* LucidWidgets.swift in Sources */,
+				LHW00002 /* LucidLiveActivity.swift in Sources */,
+				LHW00003 /* LucidWidgetBundle.swift in Sources */,
+				LHW00004 /* SharedHealthData.swift in Sources */,
+				LHW00005 /* LucidActivityAttributes.swift in Sources */,
+				LHW00007 /* LucidLog.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXSourcesBuildPhase section */
+
+/* Begin PBXTargetDependency section */
+		LHW40001A /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = LHW60001 /* LucidHealthWidgets */;
+			targetProxy = LHW40001 /* PBXContainerItemProxy */;
+		};
+/* End PBXTargetDependency section */
+
+/* Begin XCBuildConfiguration section */
+		LHAB0001 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				ASSETCATALOG_COMPILER_GENERATE_SWIFT_ASSET_SYMBOL_EXTENSIONS = NO;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++20";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = dwarf;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_TESTABILITY = YES;
+				GCC_DYNAMIC_NO_PIC = NO;
+				GCC_OPTIMIZATION_LEVEL = 0;
+				GCC_PREPROCESSOR_DEFINITIONS = (
+					"DEBUG=1",
+					"$(inherited)",
+				);
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 26.0;
+				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
+				MTL_FAST_MATH = YES;
+				ONLY_ACTIVE_ARCH = YES;
+				SDKROOT = iphoneos;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = "$(inherited) DEBUG";
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+			};
+			name = Debug;
+		};
+		LHAB0002 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				ASSETCATALOG_COMPILER_GENERATE_SWIFT_ASSET_SYMBOL_EXTENSIONS = NO;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++20";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
+				ENABLE_NS_ASSERTIONS = NO;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 26.0;
+				MTL_ENABLE_DEBUG_INFO = NO;
+				MTL_FAST_MATH = YES;
+				SDKROOT = iphoneos;
+				SWIFT_COMPILATION_MODE = wholemodule;
+				VALIDATE_PRODUCT = YES;
+			};
+			name = Release;
+		};
+		LHAB0003 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_ENTITLEMENTS = LucidHealth/LucidHealth.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = "";
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = LucidHealth/Info.plist;
+				INFOPLIST_KEY_CFBundleDisplayName = "LucidHealth";
+				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.healthcare-fitness";
+				INFOPLIST_KEY_NSSupportsLiveActivities = YES;
+				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
+				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
+				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
+				INFOPLIST_KEY_UISupportedInterfaceOrientations = UIInterfaceOrientationPortrait;
+				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad = "UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.fabi.lucidhealth;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
+				SUPPORTS_MACCATALYST = NO;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = 1;
+				ALWAYS_EMBED_SWIFT_STANDARD_LIBRARIES = YES;
+			};
+			name = Debug;
+		};
+		LHAB0004 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_ENTITLEMENTS = LucidHealth/LucidHealth.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = "";
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = LucidHealth/Info.plist;
+				INFOPLIST_KEY_CFBundleDisplayName = "LucidHealth";
+				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.healthcare-fitness";
+				INFOPLIST_KEY_NSSupportsLiveActivities = YES;
+				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
+				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
+				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
+				INFOPLIST_KEY_UISupportedInterfaceOrientations = UIInterfaceOrientationPortrait;
+				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad = "UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.fabi.lucidhealth;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
+				SUPPORTS_MACCATALYST = NO;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = 1;
+				ALWAYS_EMBED_SWIFT_STANDARD_LIBRARIES = YES;
+			};
+			name = Release;
+		};
+		/* Widget extension build configurations */
+		LHWB0001 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_GENERATE_SWIFT_ASSET_SYMBOL_EXTENSIONS = NO;
+				CODE_SIGN_ENTITLEMENTS = LucidHealthWidgets/LucidHealthWidgets.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = "";
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = LucidHealthWidgets/Info.plist;
+				INFOPLIST_KEY_CFBundleDisplayName = "LucidHealth Widgets";
+				INFOPLIST_KEY_NSHumanReadableCopyright = "";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.fabi.lucidhealth.widgets;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SKIP_INSTALL = YES;
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
+				SUPPORTS_MACCATALYST = NO;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = 1;
+			};
+			name = Debug;
+		};
+		LHWB0002 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_GENERATE_SWIFT_ASSET_SYMBOL_EXTENSIONS = NO;
+				CODE_SIGN_ENTITLEMENTS = LucidHealthWidgets/LucidHealthWidgets.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = "";
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = LucidHealthWidgets/Info.plist;
+				INFOPLIST_KEY_CFBundleDisplayName = "LucidHealth Widgets";
+				INFOPLIST_KEY_NSHumanReadableCopyright = "";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.fabi.lucidhealth.widgets;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SKIP_INSTALL = YES;
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
+				SUPPORTS_MACCATALYST = NO;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = 1;
+			};
+			name = Release;
+		};
+/* End XCBuildConfiguration section */
+
+/* Begin XCConfigurationList section */
+		LH800001 /* Build configuration list for PBXNativeTarget "LucidHealth" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				LHAB0003 /* Debug */,
+				LHAB0004 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		LH800003 /* Build configuration list for PBXProject "LucidHealth" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				LHAB0001 /* Debug */,
+				LHAB0002 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		LHW80001 /* Build configuration list for PBXNativeTarget "LucidHealthWidgets" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				LHWB0001 /* Debug */,
+				LHWB0002 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+/* End XCConfigurationList section */
+
+	};
+	rootObject = LH900001 /* Project object */;
+}

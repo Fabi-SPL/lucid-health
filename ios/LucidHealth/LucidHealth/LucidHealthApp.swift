@@ -1,0 +1,151 @@
+import SwiftUI
+import BackgroundTasks
+import UserNotifications
+
+extension Notification.Name {
+    static let lucidReconnectBLE = Notification.Name("lucidReconnectBLE")
+    /// Fired whenever auth state changes (sign-in success, token refresh, sign-out).
+    /// Views observing isAuthenticated subscribe via .onReceive to re-render
+    /// without needing SupabaseClient itself to be ObservableObject.
+    static let lucidAuthChanged = Notification.Name("lucidAuthChanged")
+    /// Fired when the VRChat broadcast toggle flips. BLEManager listens and
+    /// re-creates pushTimer with the appropriate interval (1s when broadcasting
+    /// to VRChat, 10s otherwise to save phone battery + bandwidth).
+    static let lucidVRCToggleChanged = Notification.Name("lucidVRCToggleChanged")
+}
+
+@main
+struct LucidHealthApp: App {
+    @UIApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
+    @StateObject private var bleManager = BLEManager()
+    @Environment(\.scenePhase) private var scenePhase
+
+    /// Periodic auth refresh. Token expires after ~1h; refresh every 10 min
+    /// while app is active so the user is never caught with an expired
+    /// session when they open the app.
+    @State private var authRefreshTimer: Timer?
+
+    var body: some Scene {
+        WindowGroup {
+            ContentView()
+                .environmentObject(bleManager)
+                .task {
+                    await SupabaseClient.shared.signInIfNeeded()
+                    NotificationCenter.default.post(name: .lucidAuthChanged, object: nil)
+                }
+                .onChange(of: scenePhase) { _, newPhase in
+                    handleScenePhase(newPhase)
+                }
+        }
+    }
+
+    private func handleScenePhase(_ phase: ScenePhase) {
+        switch phase {
+        case .active:
+            // Re-run sign-in on every foreground transition. Cheap when token
+            // is still valid (early-return inside ensureAuth) and refreshes
+            // when expired.
+            Task {
+                await SupabaseClient.shared.signInIfNeeded()
+                NotificationCenter.default.post(name: .lucidAuthChanged, object: nil)
+            }
+            startAuthRefreshTimer()
+        case .background, .inactive:
+            stopAuthRefreshTimer()
+        @unknown default:
+            break
+        }
+    }
+
+    private func startAuthRefreshTimer() {
+        stopAuthRefreshTimer()
+        authRefreshTimer = Timer.scheduledTimer(withTimeInterval: 600, repeats: true) { _ in
+            Task {
+                await SupabaseClient.shared.signInIfNeeded()
+                NotificationCenter.default.post(name: .lucidAuthChanged, object: nil)
+            }
+        }
+    }
+
+    private func stopAuthRefreshTimer() {
+        authRefreshTimer?.invalidate()
+        authRefreshTimer = nil
+    }
+}
+
+class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDelegate {
+    static let bleRefreshTaskId   = "com.lucid.health.ble-keepalive"
+    static let bleOvernightTaskId = "com.lucid.health.ble-overnight"
+
+    private lazy var notifySupabase = SupabaseClient()
+    private lazy var notificationListener = NotificationListener(supabase: notifySupabase)
+
+    func application(_ application: UIApplication, didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]?) -> Bool {
+        BGTaskScheduler.shared.register(forTaskWithIdentifier: Self.bleRefreshTaskId, using: nil) { task in
+            self.handleBLERefresh(task: task as! BGAppRefreshTask)
+        }
+        BGTaskScheduler.shared.register(forTaskWithIdentifier: Self.bleOvernightTaskId, using: nil) { task in
+            self.handleOvernightProcessing(task: task as! BGProcessingTask)
+        }
+
+        let center = UNUserNotificationCenter.current()
+        center.delegate = self
+        center.requestAuthorization(options: [.alert, .sound, .badge, .criticalAlert]) { granted, error in
+            print("Notification permission: \(granted ? "granted" : "denied") \(error?.localizedDescription ?? "")")
+        }
+
+        notificationListener.start()
+        return true
+    }
+
+    func userNotificationCenter(
+        _ center: UNUserNotificationCenter,
+        willPresent notification: UNNotification,
+        withCompletionHandler completionHandler: @escaping (UNNotificationPresentationOptions) -> Void
+    ) {
+        completionHandler([.banner, .sound, .list])
+    }
+
+    func applicationDidEnterBackground(_ application: UIApplication) {
+        scheduleBLERefresh()
+        scheduleOvernightProcessing()
+    }
+
+    private func scheduleBLERefresh() {
+        let request = BGAppRefreshTaskRequest(identifier: Self.bleRefreshTaskId)
+        request.earliestBeginDate = Date(timeIntervalSinceNow: 5 * 60)
+        do { try BGTaskScheduler.shared.submit(request) } catch {
+            print("BLE keepalive schedule failed: \(error)")
+        }
+    }
+
+    private func handleBLERefresh(task: BGAppRefreshTask) {
+        scheduleBLERefresh()
+        task.expirationHandler = { }
+        NotificationCenter.default.post(name: .lucidReconnectBLE, object: nil)
+        task.setTaskCompleted(success: true)
+    }
+
+    private func scheduleOvernightProcessing() {
+        let request = BGProcessingTaskRequest(identifier: Self.bleOvernightTaskId)
+        let calendar = Calendar.current
+        var components = calendar.dateComponents([.year, .month, .day], from: Date())
+        components.hour = 1
+        components.minute = 0
+        var earliest = calendar.date(from: components) ?? Date()
+        if earliest < Date() { earliest = calendar.date(byAdding: .day, value: 1, to: earliest)! }
+        request.earliestBeginDate = earliest
+        request.requiresNetworkConnectivity = false
+        request.requiresExternalPower = false
+        do { try BGTaskScheduler.shared.submit(request) } catch {
+            print("Overnight BLE processing schedule failed: \(error)")
+        }
+    }
+
+    private func handleOvernightProcessing(task: BGProcessingTask) {
+        scheduleOvernightProcessing()
+        task.expirationHandler = { }
+        NotificationCenter.default.post(name: .lucidReconnectBLE, object: nil)
+        task.setTaskCompleted(success: true)
+    }
+}
