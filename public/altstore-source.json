@@ -108,23 +108,23 @@
       "iconURL": "https://app.lucid-ai.app/icon-512.png",
       "tintColor": "#8B5CF6",
       "screenshotURLs": [],
-      "version": "1.0.3",
-      "buildVersion": "3",
-      "date": "2026-05-13T10:36:10+00:00",
-      "downloadURL": "https://db.speed-running-life.com/storage/v1/object/public/ipa-builds/LucidHealth-3.ipa",
-      "size": 3126896,
+      "version": "1.0.4",
+      "buildVersion": "4",
+      "date": "2026-05-13T11:02:11+00:00",
+      "downloadURL": "https://db.speed-running-life.com/storage/v1/object/public/ipa-builds/LucidHealth-4.ipa",
+      "size": 3126905,
       "minOSVersion": "26.0",
       "versions": [
         {
-          "version": "1.0.3",
-          "buildVersion": "3",
-          "date": "2026-05-13T10:36:10+00:00",
-          "size": 3126896,
-          "downloadURL": "https://db.speed-running-life.com/storage/v1/object/public/ipa-builds/LucidHealth-3.ipa",
+          "version": "1.0.4",
+          "buildVersion": "4",
+          "date": "2026-05-13T11:02:11+00:00",
+          "size": 3126905,
+          "downloadURL": "https://db.speed-running-life.com/storage/v1/object/public/ipa-builds/LucidHealth-4.ipa",
           "assetURLs": {
             "manifest": "https://db.speed-running-life.com/storage/v1/object/public/ipa-builds/lucidhealth-manifest.json"
           },
-          "localizedDescription": "Build 3",
+          "localizedDescription": "Build 4",
           "minOSVersion": "26.0"
         }
       ],
