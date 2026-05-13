@@ -174,7 +174,7 @@ jobs:
         run: |
           IPA_SIZE=$(stat -f%z $RUNNER_TEMP/LucidHealth.ipa)
           BUILD_DATE_ISO=$(date -u +%Y-%m-%dT%H:%M:%S+00:00)
-          STORAGE_BASE=""
+          STORAGE_BASE="${SUPABASE_STORAGE_PUBLIC_BASE}"
           # Versioned URL — AltStore client-side cache key is the URL. By making
           # each build's IPA URL unique, AltStore can never serve a stale IPA
           # from cache after a source refresh, eliminating the recurring
@@ -201,7 +201,7 @@ jobs:
             "downloadURL": "${DOWNLOAD_URL}",
             "size": ${IPA_SIZE},
             "minOSVersion": "26.0",
-            "versions": [{"version":"1.0.${RUN_NUMBER}","buildVersion":"${RUN_NUMBER}","date":"${BUILD_DATE_ISO}","size":${IPA_SIZE},"downloadURL":"${DOWNLOAD_URL}","assetURLs":{"manifest":"/lucidhealth-manifest.json"},"localizedDescription":"Build ${RUN_NUMBER}","minOSVersion":"26.0"}],
+            "versions": [{"version":"1.0.${RUN_NUMBER}","buildVersion":"${RUN_NUMBER}","date":"${BUILD_DATE_ISO}","size":${IPA_SIZE},"downloadURL":"${DOWNLOAD_URL}","assetURLs":{"manifest":"${SUPABASE_STORAGE_PUBLIC_BASE}/lucidhealth-manifest.json"},"localizedDescription":"Build ${RUN_NUMBER}","minOSVersion":"26.0"}],
             "appPermissions": {"entitlements":["com.apple.security.application-groups"],"privacy":{"NSBluetoothAlwaysUsageDescription":"Connects to Whoop via BLE.","NSBluetoothPeripheralUsageDescription":"Connects to Whoop via BLE (legacy peripheral key).","NSCameraUsageDescription":"Take photos of meals.","NSPhotoLibraryUsageDescription":"Pick existing meal photos.","NSHealthShareUsageDescription":"Reads health data from Apple Health for body-state correlation.","NSHealthUpdateUsageDescription":"Writes recovery and HRV data back to Apple Health.","NSLocationWhenInUseUsageDescription":"Tags meals and body-state snapshots with location.","NSLocationAlwaysAndWhenInUseUsageDescription":"Background location for activity context (rides, walks)."}}
           }
           JSONEND
@@ -217,7 +217,7 @@ jobs:
           SUPABASE_STORAGE_WRITE_BASE: ${{ vars.SUPABASE_STORAGE_WRITE_BASE }}
           RUN_NUMBER: ${{ github.run_number }}
         run: |
-          STORAGE_BASE=""
+          STORAGE_BASE="${SUPABASE_STORAGE_WRITE_BASE}"
 
           # Generate per-build ADP manifest so AltStore PAL's version check passes
           # (must match source.json's version + buildVersion for THIS build)
