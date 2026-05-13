@@ -1,0 +1,80 @@
+{
+  "name": "Lucid Health (Open)",
+  "identifier": "app.lucidhealth.source",
+  "sourceURL": "https://db.speed-running-life.com/storage/v1/object/public/ipa-builds/altstore-source.json",
+  "iconURL": "https://app.lucid-ai.app/icon-512.png",
+  "tintColor": "#8B5CF6",
+  "apps": [
+    {
+      "name": "Lucid Health",
+      "bundleIdentifier": "com.fabi.lucidhealth",
+      "developerName": "Fabi",
+      "localizedDescription": "Unified health companion - streams Whoop BLE data and logs meals with Gemini Vision to surface brain-health patterns.",
+      "iconURL": "https://app.lucid-ai.app/icon-512.png",
+      "tintColor": "#8B5CF6",
+      "screenshotURLs": [],
+      "version": "1.0.83",
+      "buildVersion": "83",
+      "date": "2026-05-11T09:49:47+00:00",
+      "downloadURL": "https://db.speed-running-life.com/storage/v1/object/public/ipa-builds/LucidHealth-83.ipa",
+      "size": 3125449,
+      "minOSVersion": "26.0",
+      "versions": [
+        {
+          "version": "1.0.83",
+          "buildVersion": "83",
+          "date": "2026-05-11T09:49:47+00:00",
+          "size": 3125449,
+          "downloadURL": "https://db.speed-running-life.com/storage/v1/object/public/ipa-builds/LucidHealth-83.ipa",
+          "assetURLs": {
+            "manifest": "https://db.speed-running-life.com/storage/v1/object/public/ipa-builds/lucidhealth-manifest.json"
+          },
+          "localizedDescription": "Build 83",
+          "minOSVersion": "26.0"
+        }
+      ],
+      "appPermissions": {
+        "entitlements": [
+          {
+            "name": "com.apple.security.application-groups"
+          }
+        ],
+        "privacy": [
+          {
+            "name": "NSBluetoothAlwaysUsageDescription",
+            "usageDescription": "Connects to Whoop via BLE."
+          },
+          {
+            "name": "NSBluetoothPeripheralUsageDescription",
+            "usageDescription": "Connects to Whoop via BLE (legacy peripheral key)."
+          },
+          {
+            "name": "NSCameraUsageDescription",
+            "usageDescription": "Take photos of meals."
+          },
+          {
+            "name": "NSPhotoLibraryUsageDescription",
+            "usageDescription": "Pick existing meal photos."
+          },
+          {
+            "name": "NSHealthShareUsageDescription",
+            "usageDescription": "Reads health data from Apple Health for body-state correlation."
+          },
+          {
+            "name": "NSHealthUpdateUsageDescription",
+            "usageDescription": "Writes recovery and HRV data back to Apple Health."
+          },
+          {
+            "name": "NSLocationWhenInUseUsageDescription",
+            "usageDescription": "Tags meals and body-state snapshots with location."
+          },
+          {
+            "name": "NSLocationAlwaysAndWhenInUseUsageDescription",
+            "usageDescription": "Background location for activity context (rides, walks)."
+          }
+        ]
+      }
+    }
+  ],
+  "news": []
+}
