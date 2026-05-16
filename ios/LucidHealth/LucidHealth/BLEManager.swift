@@ -190,21 +190,21 @@ class BLEManager: NSObject, ObservableObject {
     private let connectionTimeout: TimeInterval = 10
 
     // MARK: - Supabase push timer
-    // v66 — pushInterval was 10s. Per IOS_LATENCY_BRIEF.md (2026-05-06), VRChat
-    // / Magic Chatbox feels lagged because realtime_health rows arrived once
-    // every 10s. Dropping to 1s keeps the avatar/chatbox in near-real-time
-    // (BLE strap samples at 1Hz so 1s push interval matches the source rate).
-    // Cellular network adds 50-500ms; total perceived latency now <2s.
+    // v66 — pushInterval was 10s. Downstream consumers felt lagged because
+    // realtime_health rows arrived once every 10s. Dropping to 1s keeps live
+    // consumers in near-real-time (BLE strap samples at 1Hz so 1s push
+    // interval matches the source rate). Cellular network adds 50-500ms;
+    // total perceived latency now <2s.
     private var pushTimer: Timer?
-    /// Push cadence is conditional on VRChat broadcast toggle:
-    ///   • Broadcaster ON  → 1s (BLE-rate, near-real-time for chatbox/avatar)
+    /// Push cadence is conditional on the high-frequency broadcast toggle:
+    ///   • Broadcaster ON  → 1s (BLE-rate, near-real-time)
     ///   • Broadcaster OFF → 10s (battery + bandwidth conservation)
-    /// UserDefaults mirror is kept in sync by VRChatBroadcastCard.save() and
-    /// .load() — BLEManager re-reads on every timer rebuild, triggered by
-    /// .lucidVRCToggleChanged notification.
-    static let vrcBroadcastEnabledKey = "lucid_vrc_broadcast_enabled"
+    /// UserDefaults mirror is kept in sync by HighFrequencyBroadcastCard.save()
+    /// and .load() — BLEManager re-reads on every timer rebuild, triggered by
+    /// .lucidHFBToggleChanged notification.
+    static let hfbBroadcastEnabledKey = "lucid_hfb_broadcast_enabled"
     private var pushInterval: TimeInterval {
-        UserDefaults.standard.bool(forKey: Self.vrcBroadcastEnabledKey) ? 1.0 : 10.0
+        UserDefaults.standard.bool(forKey: Self.hfbBroadcastEnabledKey) ? 1.0 : 10.0
     }
     private var pendingReadings: [HRReading] = []
     // v98 — latest IMU values cached for realtime_health pushes. Without this,
@@ -313,17 +313,17 @@ class BLEManager: NSObject, ObservableObject {
             self?.log("Cold-start widget sync: shared health data written to App Group")
         }
 
-        // VRChat broadcast toggle observer — when Fabi flips the toggle in
-        // Settings, restart pushTimer with the new interval (1s when on for
-        // near-real-time chatbox/avatar, 10s when off to save battery+data).
+        // High-frequency broadcast toggle observer — when Fabi flips the toggle
+        // in Settings, restart pushTimer with the new interval (1s when on for
+        // near-real-time, 10s when off to save battery+data).
         NotificationCenter.default.addObserver(
-            forName: .lucidVRCToggleChanged,
+            forName: .lucidHFBToggleChanged,
             object: nil,
             queue: .main
         ) { [weak self] _ in
             guard let self else { return }
-            let enabled = UserDefaults.standard.bool(forKey: Self.vrcBroadcastEnabledKey)
-            self.log("VRC toggle changed: broadcaster \(enabled ? "ON" : "OFF") → pushInterval \(self.pushInterval)s")
+            let enabled = UserDefaults.standard.bool(forKey: Self.hfbBroadcastEnabledKey)
+            self.log("HFB toggle changed: broadcaster \(enabled ? "ON" : "OFF") → pushInterval \(self.pushInterval)s")
             // Restart timer only if currently streaming (otherwise it's already
             // invalidated and will pick up the new interval on next connect).
             if self.pushTimer != nil {

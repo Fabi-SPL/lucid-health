@@ -92,7 +92,7 @@ struct SettingsView: View {
                     .opacity(appeared ? 1 : 0)
                     .animation(DS.Anim.stagger(index: 7), value: appeared)
 
-                VRChatBroadcastCard()
+                HighFrequencyBroadcastCard()
                     .offset(y: appeared ? 0 : 20)
                     .opacity(appeared ? 1 : 0)
                     .animation(DS.Anim.stagger(index: 8), value: appeared)
