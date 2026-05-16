@@ -143,10 +143,12 @@ final class ExperimentalFeaturesService {
     }
 
     // ════════════════════════════════════════════════════════════════
-    // MARK: - VRChat OSC broadcast
+    // MARK: - High-frequency broadcast
+    // (wire field names osc_host/osc_port + table `vrc_settings` are kept
+    //  as-is — an external desktop bridge consumes this exact contract.)
     // ════════════════════════════════════════════════════════════════
 
-    struct VRCSettings: Codable {
+    struct HFBSettings: Codable {
         var enabled: Bool
         var osc_host: String
         var osc_port: Int
@@ -181,7 +183,7 @@ final class ExperimentalFeaturesService {
         var drunk_bar_chars: Int?
     }
 
-    func fetchVRCSettings() async -> VRCSettings? {
+    func fetchHFBSettings() async -> HFBSettings? {
         do { try await ensureAuth() } catch { return nil }
         guard let token = accessToken else { return nil }
         let urlStr = "\(baseURL)/rest/v1/vrc_settings?user_id=eq.\(userId)&select=*"
@@ -191,11 +193,11 @@ final class ExperimentalFeaturesService {
         req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
         do {
             let (data, _) = try await URLSession.shared.data(for: req)
-            return (try? JSONDecoder().decode([VRCSettings].self, from: data))?.first
+            return (try? JSONDecoder().decode([HFBSettings].self, from: data))?.first
         } catch { return nil }
     }
 
-    func upsertVRCSettings(_ s: VRCSettings) async -> Bool {
+    func upsertHFBSettings(_ s: HFBSettings) async -> Bool {
         do { try await ensureAuth() } catch { return false }
         guard let token = accessToken else { return false }
         let urlStr = "\(baseURL)/rest/v1/vrc_settings?on_conflict=user_id"

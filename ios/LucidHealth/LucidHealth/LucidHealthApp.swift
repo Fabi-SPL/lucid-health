@@ -8,10 +8,10 @@ extension Notification.Name {
     /// Views observing isAuthenticated subscribe via .onReceive to re-render
     /// without needing SupabaseClient itself to be ObservableObject.
     static let lucidAuthChanged = Notification.Name("lucidAuthChanged")
-    /// Fired when the VRChat broadcast toggle flips. BLEManager listens and
-    /// re-creates pushTimer with the appropriate interval (1s when broadcasting
-    /// to VRChat, 10s otherwise to save phone battery + bandwidth).
-    static let lucidVRCToggleChanged = Notification.Name("lucidVRCToggleChanged")
+    /// Fired when the high-frequency broadcast toggle flips. BLEManager listens
+    /// and re-creates pushTimer with the appropriate interval (1s while
+    /// broadcasting, 10s otherwise to save phone battery + bandwidth).
+    static let lucidHFBToggleChanged = Notification.Name("lucidHFBToggleChanged")
 }
 
 @main

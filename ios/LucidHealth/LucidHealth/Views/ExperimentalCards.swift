@@ -220,9 +220,9 @@ struct DiscordBroadcastCard: View {
     }
 }
 
-// MARK: - VRChat OSC Broadcast Card
+// MARK: - High Frequency Broadcast Card
 
-struct VRChatBroadcastCard: View {
+struct HighFrequencyBroadcastCard: View {
     @State private var enabled = false
     @State private var lastMessage: String? = nil
     @State private var loaded = false
@@ -233,14 +233,14 @@ struct VRChatBroadcastCard: View {
     var body: some View {
         VStack(alignment: .leading, spacing: DS.Spacing.md) {
             HStack {
-                SectionHeader(icon: "globe", title: "VRChat Chatbox", iconColor: DS.Colors.teal)
+                SectionHeader(icon: "antenna.radiowaves.left.and.right", title: "High Frequency Broadcast", iconColor: DS.Colors.teal)
                 Spacer()
                 if enabled {
                     StatusChip(text: "live", style: .teal, icon: "dot.radiowaves.left.and.right")
                 }
             }
 
-            Text("Broadcasts your live biometrics to VRChat. All formatting and mode config lives in the Magic Chatbox app on Windows. This toggle just gates whether broadcasting runs.")
+            Text("Streams live biometrics at a 1 s push cadence while enabled. Uses more battery and data than the default 10 s interval.")
                 .font(.system(size: 12, design: .rounded))
                 .foregroundStyle(DS.Colors.textSecondary)
 
@@ -267,10 +267,10 @@ struct VRChatBroadcastCard: View {
             .tint(DS.Colors.teal)
             .onChange(of: enabled) { _, newValue in
                 // Mirror to UserDefaults + notify BLEManager to retune pushInterval.
-                // BLEManager pushes every 1s when broadcaster is ON (real-time
-                // chatbox/avatar) and every 10s when OFF (battery conservation).
-                UserDefaults.standard.set(newValue, forKey: BLEManager.vrcBroadcastEnabledKey)
-                NotificationCenter.default.post(name: .lucidVRCToggleChanged, object: nil)
+                // BLEManager pushes every 1s when broadcaster is ON and every
+                // 10s when OFF (battery conservation).
+                UserDefaults.standard.set(newValue, forKey: BLEManager.hfbBroadcastEnabledKey)
+                NotificationCenter.default.post(name: .lucidHFBToggleChanged, object: nil)
                 Task { await save() }
             }
         }
@@ -280,15 +280,15 @@ struct VRChatBroadcastCard: View {
     }
 
     private func load() async {
-        if let s = await svc.fetchVRCSettings() {
+        if let s = await svc.fetchHFBSettings() {
             await MainActor.run {
                 enabled = s.enabled
                 lastMessage = s.last_message
                 loaded = true
                 // Sync UserDefaults mirror + notify BLEManager so pushInterval
                 // matches the persisted Supabase state on every app launch.
-                UserDefaults.standard.set(s.enabled, forKey: BLEManager.vrcBroadcastEnabledKey)
-                NotificationCenter.default.post(name: .lucidVRCToggleChanged, object: nil)
+                UserDefaults.standard.set(s.enabled, forKey: BLEManager.hfbBroadcastEnabledKey)
+                NotificationCenter.default.post(name: .lucidHFBToggleChanged, object: nil)
             }
         } else {
             loaded = true
@@ -301,12 +301,12 @@ struct VRChatBroadcastCard: View {
         defer { saving = false }
         // Fetch existing settings to preserve fields the broadcaster's UI now owns
         // (mode, vibe_style, privacy_mode, etc.). We only mutate enabled.
-        if var s = await svc.fetchVRCSettings() {
+        if var s = await svc.fetchHFBSettings() {
             s.enabled = enabled
-            _ = await svc.upsertVRCSettings(s)
+            _ = await svc.upsertHFBSettings(s)
         } else {
             // First-run: write a sensible default record with just enabled
-            let fresh = ExperimentalFeaturesService.VRCSettings(
+            let fresh = ExperimentalFeaturesService.HFBSettings(
                 enabled: enabled,
                 osc_host: "127.0.0.1", osc_port: 9000, refresh_seconds: 1.0,
                 mode: "vibe",
@@ -325,7 +325,7 @@ struct VRChatBroadcastCard: View {
                 drunk_only_when_tagged: true,
                 energy_bar_chars: 10, drunk_bar_chars: 10
             )
-            _ = await svc.upsertVRCSettings(fresh)
+            _ = await svc.upsertHFBSettings(fresh)
         }
         if enabled {
             UIImpactFeedbackGenerator(style: .light).impactOccurred()
