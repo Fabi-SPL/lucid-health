@@ -264,43 +264,34 @@ class SupabaseClient {
                 try await ensureAuth()
                 guard accessToken != nil else { return }
 
-                // v100 — explicit on_conflict query param. PostgREST in our self-hosted
-                // Supabase requires both Prefer:resolution=merge-duplicates AND
-                // ?on_conflict=<unique-cols> to actually upsert. Without on_conflict,
-                // the second+ POST per day returns 409 silently — which is why
-                // recovery score has been frozen on the first-of-day computation
-                // for weeks (every recompute → 409 → no DB update → app sees stale value).
-                let url = URL(string: "\(baseURL)/rest/v1/health_metrics?on_conflict=user_id,metric_date")!
-                var request = URLRequest(url: url)
-                request.httpMethod = "POST"
-                request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-                request.setValue(anonKey, forHTTPHeaderField: "apikey")
-                request.setValue("resolution=merge-duplicates", forHTTPHeaderField: "Prefer")
-                request.setValue("Bearer \(accessToken!)", forHTTPHeaderField: "Authorization")
-
+                // v103 — single source of truth. iOS is UPDATE-ONLY for the
+                // side-channel experimental metrics: PATCH an EXISTING daily
+                // row, never create one. The daily aggregate row and every
+                // pg-owned column (recovery_score, sleep_*, hrv_avg, resting_hr,
+                // readiness_*, source) are owned exclusively by
+                // recompute_health_metrics() + pg_cron. If no row exists yet
+                // for `today`, this PATCH updates 0 rows (clean no-op) so the
+                // day reads as "no data" instead of a fabricated stale row.
+                // (The old POST-upsert created source='health_engine' rows
+                // that permanently polluted every day pg_recompute never ran —
+                // null/stale recovery the app then displayed as a stuck value.)
                 let formatter = DateFormatter()
                 formatter.dateFormat = "yyyy-MM-dd"
                 let today = formatter.string(from: Date())
 
-                // v100 architecture migration — Postgres is the single writer for
-                // ALL pg-owned columns: hrv_avg, resting_hr, sleep_hours, deep/rem/light/awake_min,
-                // sleep_start/end, sleep_efficiency_pct, sleep_score, recovery_score,
-                // readiness_level, readiness_score. iOS only writes side-channel
-                // experimental metrics (sdnn, pnn50, dfa, cognitive, illness, training, poincare,
-                // strain breakdown, skin_temp, respiratory_rate, vo2max). Source: 'health_engine'
-                // for these side-channel writes — the daily aggregate remains 'pg_recompute'
-                // because pg_recompute writes use INSERT ... ON CONFLICT DO UPDATE that
-                // overwrites this row's source. iOS-only writes will create the row when
-                // pg_recompute hasn't run yet for today.
-                var body: [String: Any] = [
-                    "user_id": userId,
-                    "metric_date": today,
-                    "source": "health_engine"
-                ]
-                // ⚠️ DO NOT WRITE: recovery_score, sleep_score, sleep_hours, deep_sleep_min,
-                // rem_sleep_min, light_sleep_min, awake_min, sleep_start, sleep_end,
-                // sleep_efficiency_pct, hrv_avg, resting_hr, readiness_level, readiness_score
-                // These are owned by recompute_health_metrics() RPC + pg_cron.
+                let url = URL(string: "\(baseURL)/rest/v1/health_metrics?user_id=eq.\(userId)&metric_date=eq.\(today)")!
+                var request = URLRequest(url: url)
+                request.httpMethod = "PATCH"
+                request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+                request.setValue(anonKey, forHTTPHeaderField: "apikey")
+                request.setValue("return=minimal", forHTTPHeaderField: "Prefer")
+                request.setValue("Bearer \(accessToken!)", forHTTPHeaderField: "Authorization")
+
+                // Side-channel experimental metrics ONLY. NEVER write:
+                // recovery_score, sleep_score, sleep_hours, deep/rem/light/awake_min,
+                // sleep_start, sleep_end, sleep_efficiency_pct, hrv_avg, resting_hr,
+                // readiness_level, readiness_score, source — owned by pg_recompute.
+                var body: [String: Any] = [:]
                 if strainScore > 0 { body["strain_score"] = round(strainScore * 10) / 10 }
                 if respiratoryRate > 0 { body["respiratory_rate"] = round(respiratoryRate * 10) / 10 }
                 if skinTemp > 0 && skinTemp < 45 { body["skin_temp"] = round(skinTemp * 10) / 10 }
@@ -336,18 +327,21 @@ class SupabaseClient {
                 if hrr1 > 0 { body["hrr_1min"] = round(hrr1) }
                 if hrr2 > 0 { body["hrr_2min"] = round(hrr2) }
 
+                guard !body.isEmpty else {
+                    log("No side-channel metrics ready for \(today) — skipping PATCH")
+                    return
+                }
                 request.httpBody = try JSONSerialization.data(withJSONObject: body)
 
                 let (_, response) = try await session.data(for: request)
                 let statusCode = (response as? HTTPURLResponse)?.statusCode ?? 0
                 if statusCode < 300 {
-                    log("Daily metrics saved for \(today) (full intelligence)")
+                    log("Side-channel metrics patched for \(today)")
                 } else {
-                    log("Daily upsert failed: HTTP \(statusCode) — queuing for retry")
-                    // v100 — endpoint includes on_conflict so the offline-queue replay
-                    // also upserts correctly when reconnected.
-                    queueOfflineWrite(body, endpoint: "health_metrics?on_conflict=user_id,metric_date",
-                                      extraHeaders: ["Prefer": "resolution=merge-duplicates"])
+                    // Non-critical: the periodic 30-min cycle re-PATCHes. Do NOT
+                    // offline-queue a POST here — that is exactly what re-created
+                    // polluted source='health_engine' rows. Drop; next cycle retries.
+                    log("Side-channel PATCH failed HTTP \(statusCode) — retry next cycle")
                 }
             } catch {
                 // Network-level error (no response at all). The 30-min periodic upsert
