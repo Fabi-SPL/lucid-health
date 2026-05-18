@@ -2224,4 +2224,37 @@ extension SupabaseClient {
         }
         return nil
     }
+
+    // MARK: - Recovery Trend (14-day sparkline under HeroRecoveryRing)
+
+    /// Last `days` server recovery scores, oldest → newest, NULL days dropped.
+    /// Powers RecoveryTrendStrip so the (genuinely 9-100 swinging) score's
+    /// movement is visible instead of looking "stuck" at one number.
+    func fetchRecoveryTrend(days: Int = 14) async -> [Double] {
+        do {
+            try await ensureAuth()
+            guard accessToken != nil else { return [] }
+            var comps = URLComponents(string: "\(baseURL)/rest/v1/health_metrics")!
+            comps.queryItems = [
+                URLQueryItem(name: "user_id", value: "eq.\(userId)"),
+                URLQueryItem(name: "recovery_score", value: "not.is.null"),
+                URLQueryItem(name: "order", value: "metric_date.desc"),
+                URLQueryItem(name: "limit", value: "\(days)"),
+                URLQueryItem(name: "select", value: "metric_date,recovery_score")
+            ]
+            var req = URLRequest(url: comps.url!)
+            req.httpMethod = "GET"
+            req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+            let (data, response) = try await authedRequest(req)
+            guard ((response as? HTTPURLResponse)?.statusCode ?? 0) < 300 else { return [] }
+            guard let arr = try? JSONSerialization.jsonObject(with: data) as? [[String: Any]] else { return [] }
+            // server gave newest-first; reverse to oldest → newest for the strip
+            let scores = arr.reversed().compactMap { row -> Double? in
+                (row["recovery_score"] as? NSNumber)?.doubleValue
+            }
+            return scores
+        } catch {
+            return []
+        }
+    }
 }
