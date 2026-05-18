@@ -27,6 +27,7 @@ struct TodayView: View {
     @State private var error: String?
     @State private var appeared = false
     @State private var hasLoaded = false
+    @State private var recoveryTrend: [Double] = []
     @State private var saveSuccessCount = 0
     @State private var saveErrorCount = 0
     @StateObject private var modeStore = AppModeStore()
@@ -183,6 +184,7 @@ struct TodayView: View {
             await loadEntries()
             withAnimation(DS.Anim.cardAppear) { appeared = true }
             hasLoaded = true
+            recoveryTrend = await bleManager.supabase.fetchRecoveryTrend()
         }
         .onDisappear { modeStore.stop() }
         // Reload entries when app comes back to foreground — picks up server-side
@@ -201,6 +203,8 @@ struct TodayView: View {
                             bleManager.healthEngine.sleepScore = result.sleepScore
                         }
                     }
+                    let trend = await bleManager.supabase.fetchRecoveryTrend()
+                    await MainActor.run { recoveryTrend = trend }
                 }
             }
         }
@@ -473,6 +477,12 @@ struct TodayView: View {
             }
                 .statusGlow(DS.Colors.recoveryColor(engine.recoveryScore), intensity: 0.7)
                 .padding(.top, DS.Spacing.sm)
+
+            // 14-day recovery trend — makes the (real, 9-100 swinging) score's
+            // movement visible so a correct-but-varying number stops reading
+            // as "stuck at 60".
+            RecoveryTrendStrip(scores: recoveryTrend)
+                .padding(.horizontal, DS.Spacing.lg)
 
             // Recovery context line — PINCH style, pre-baked, no AI narration
             Text(recoveryContextLine)
