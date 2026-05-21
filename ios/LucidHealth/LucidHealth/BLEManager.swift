@@ -1243,10 +1243,29 @@ class BLEManager: NSObject, ObservableObject {
             var skippedAlreadyCovered = 0
             var skippedOutOfRange = 0
             var skippedZeroHR = 0
+            // v104 diagnostic: capture the first N out-of-range timestamps so
+            // we can see what the strap is actually returning. The May 21
+            // manual-72h push returned 9 records, all out-of-range, with no
+            // visibility into why. This logs samples (not all — bounded) so
+            // the next reproduce surfaces strap-clock drift / wrong epoch /
+            // empty buffer noise unambiguously.
+            var oorSamples: [String] = []
+            let oorSampleCap = 8
 
             for r in recordsFromStrap {
                 let ts = Int(r.timestamp)
                 guard ts >= minUnix && ts <= maxUnix && ts <= nowUnix + 60 else {
+                    if oorSamples.count < oorSampleCap {
+                        // hr=NN ts=UNIX (ISO) — compact, parseable in bridge_logs
+                        let isoStr: String = {
+                            if ts > 0 && ts < 4_102_444_800 { // < year 2100
+                                let f = ISO8601DateFormatter()
+                                return f.string(from: Date(timeIntervalSince1970: TimeInterval(ts)))
+                            }
+                            return "invalid"
+                        }()
+                        oorSamples.append("hr=\(r.heartRate) ts=\(ts) iso=\(isoStr)")
+                    }
                     skippedOutOfRange += 1
                     continue
                 }
@@ -1275,6 +1294,15 @@ class BLEManager: NSObject, ObservableObject {
 
             self.supabase.pushDebugLog(key: "history_sync_dedup_result", value: "trigger=\(trigger) to_upload=\(dedupedRecords.count) already_covered=\(skippedAlreadyCovered) out_of_range=\(skippedOutOfRange) zero_hr=\(skippedZeroHR) total_from_strap=\(recordsFromStrap.count)")
             self.log("Dedup [\(trigger)]: \(dedupedRecords.count) to upload, \(skippedAlreadyCovered) already covered, \(skippedOutOfRange) out of window, \(skippedZeroHR) zero-HR (of \(recordsFromStrap.count))")
+            // v104 diagnostic: dump out-of-range samples + window so we can
+            // diagnose the empty/garbage buffer mystery (May 21 manual backfill).
+            if !oorSamples.isEmpty {
+                let windowDesc = "window=[\(minUnix)..\(maxUnix)] now=\(nowUnix)"
+                self.supabase.pushDebugLog(
+                    key: "history_sync_oor_samples",
+                    value: "trigger=\(trigger) \(windowDesc) count=\(skippedOutOfRange) samples=[\(oorSamples.joined(separator: " | "))]"
+                )
+            }
 
             if self.isManualBackfillMode {
                 DispatchQueue.main.async {
