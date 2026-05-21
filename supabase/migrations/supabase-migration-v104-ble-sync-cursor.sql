@@ -149,12 +149,21 @@ BEGIN
       WHERE user_id = p_user_id AND state = 'open'
     ) INTO has_open_alert;
 
+    -- Match any in-flight / just-finished sync activity in the last 60 min:
+    --   • auto-reconnect path:  history_sync_gap_check  value~'decision=download'
+    --   • manual-72h path:      history_sync_request_sent  value~'trigger=manual-72h'
+    --   • either path complete: history_sync_complete (the sync finished within
+    --     the window; data may still be propagating to realtime_health view)
     SELECT EXISTS (
       SELECT 1 FROM bridge_logs
-      WHERE user_id    = p_user_id
-        AND key        = 'history_sync_gap_check'
-        AND value::text LIKE '%trigger%'
+      WHERE user_id = p_user_id
         AND created_at >= NOW() - INTERVAL '60 minutes'
+        AND (
+          (key = 'history_sync_gap_check'   AND value::text LIKE '%decision=download%')
+          OR key = 'history_sync_request_sent'
+          OR key = 'history_sync_complete'
+          OR key = 'history_sync_batch_start'
+        )
     ) INTO has_recent_backfill;
 
     IF has_open_alert OR has_recent_backfill THEN
