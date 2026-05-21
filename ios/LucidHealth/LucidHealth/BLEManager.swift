@@ -847,6 +847,36 @@ class BLEManager: NSObject, ObservableObject {
             let gap = Date().timeIntervalSince(lastSync)
             let gapMinutes = Int(gap / 60)
 
+            // v104 SHADOW MODE — compute the server-held cursor's verdict in
+            // parallel and log disagreement. NO behaviour change. After 7 days
+            // of clean disagreement logs, this becomes the authoritative path
+            // and the UserDefaults.lastSync code deletes.
+            //
+            // See research_report_20260521_whoop_ble_backfill.md §4.6 Phase 2.
+            let deviceId = self.peripheral?.identifier.uuidString ?? "unknown"
+            let clientDecision: String = gapMinutes > 1 ? "download" : "skip"
+            Task { [weak self] in
+                guard let self else { return }
+                let cursor = await self.supabase.fetchSyncCursor(deviceId: deviceId)
+                let serverMins = cursor?.minutesSinceLast
+                let serverDecision: String = {
+                    guard let cursor else { return "fetch_failed" }
+                    // First-sync (no rows yet) → backfill is correct
+                    if cursor.lastSeq == nil { return "backfill_first_sync" }
+                    // Otherwise: backfill if >1 min stale, mirroring legacy threshold
+                    if let m = serverMins, m > 1 { return "backfill" }
+                    return "skip"
+                }()
+                let agree = (clientDecision == "skip"     && serverDecision == "skip")
+                         || (clientDecision == "download" && (serverDecision == "backfill" || serverDecision == "backfill_first_sync"))
+                self.supabase.pushDebugLog(
+                    key: "history_sync_shadow",
+                    value: "agree=\(agree) client=\(clientDecision) server=\(serverDecision) "
+                         + "client_gap_min=\(gapMinutes) server_mins=\(serverMins.map{ String(format: "%.1f", $0) } ?? "nil") "
+                         + "device_id=\(deviceId.prefix(8))"
+                )
+            }
+
             if gapMinutes > 1 {
                 self.log("GAP DETECTED: \(gapMinutes) min since last sync")
                 self.supabase.pushDebugLog(key: "history_sync_gap_check", value: "decision=download gap_min=\(gapMinutes) last_sync=\(Int(lastSync.timeIntervalSince1970))")

@@ -2257,4 +2257,53 @@ extension SupabaseClient {
             return []
         }
     }
+
+    // MARK: - v104 BLE Sync Cursor (server-held, replaces UserDefaults.lastSync)
+
+    /// Server's authoritative answer to "what's the latest BLE sample we have
+    /// from this strap?". Powers the v104 architectural fix for the repeating
+    /// backfill regression — see research_report_20260521_whoop_ble_backfill.md.
+    struct BLESyncCursor {
+        let lastSeq: Int64?
+        let lastRecordedAt: Date?
+        let minutesSinceLast: Double?  // nil if no rows ever
+    }
+
+    func fetchSyncCursor(deviceId: String) async -> BLESyncCursor? {
+        do {
+            try await ensureAuth()
+            guard accessToken != nil else { return nil }
+            var comps = URLComponents(string: "\(baseURL)/rest/v1/v_ble_sync_cursor")!
+            comps.queryItems = [
+                URLQueryItem(name: "user_id", value: "eq.\(userId)"),
+                URLQueryItem(name: "device_id", value: "eq.\(deviceId)"),
+                URLQueryItem(name: "select", value: "last_seq,last_recorded_at,minutes_since_last"),
+                URLQueryItem(name: "limit", value: "1")
+            ]
+            var req = URLRequest(url: comps.url!)
+            req.httpMethod = "GET"
+            req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+            let (data, response) = try await authedRequest(req)
+            guard ((response as? HTTPURLResponse)?.statusCode ?? 0) < 300 else { return nil }
+            guard let arr = try? JSONSerialization.jsonObject(with: data) as? [[String: Any]],
+                  let row = arr.first else {
+                // No rows for this device_id yet (first sync) — return a cursor
+                // with all nils so caller knows to backfill from scratch.
+                return BLESyncCursor(lastSeq: nil, lastRecordedAt: nil, minutesSinceLast: nil)
+            }
+            let lastSeq = (row["last_seq"] as? NSNumber)?.int64Value
+            let lastRecordedAt: Date? = {
+                guard let s = row["last_recorded_at"] as? String else { return nil }
+                let iso = ISO8601DateFormatter()
+                iso.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+                if let d = iso.date(from: s) { return d }
+                iso.formatOptions = [.withInternetDateTime]
+                return iso.date(from: s)
+            }()
+            let mins = (row["minutes_since_last"] as? NSNumber)?.doubleValue
+            return BLESyncCursor(lastSeq: lastSeq, lastRecordedAt: lastRecordedAt, minutesSinceLast: mins)
+        } catch {
+            return nil
+        }
+    }
 }
