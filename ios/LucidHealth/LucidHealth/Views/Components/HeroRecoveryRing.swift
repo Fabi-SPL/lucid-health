@@ -500,3 +500,37 @@ struct RecoveryTrendStrip: View {
         return 6 + CGFloat(clamped / 100) * 28
     }
 }
+
+// MARK: - AlcoholNightChip (v106)
+//
+// Subtle chip under the recovery ring on alcohol nights. Frames a low score
+// as honest signal ("your body is hungover, not the app is broken") rather
+// than alarm. Single-line, muted color, low-emphasis treatment per the
+// lucid-design "no alarming red" principle.
+struct AlcoholNightChip: View {
+    var body: some View {
+        HStack(spacing: 8) {
+            Text("🍺")
+                .font(.system(size: 14))
+            Text("Alcohol night detected")
+                .font(.system(size: 12, weight: .semibold, design: .rounded))
+                .foregroundStyle(DS.Colors.textSecondary)
+            Spacer()
+            Text("Score is honest")
+                .font(.system(size: 11, weight: .medium, design: .rounded))
+                .foregroundStyle(DS.Colors.textMuted)
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 10)
+        .background(
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .fill(DS.Colors.surfaceElevated.opacity(0.6))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .strokeBorder(DS.Colors.textFaint.opacity(0.18), lineWidth: 0.5)
+        )
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("Alcohol night detected. Score is honest.")
+    }
+}

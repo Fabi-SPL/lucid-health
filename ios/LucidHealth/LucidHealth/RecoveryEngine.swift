@@ -77,7 +77,9 @@ extension HealthEngine {
             UserDefaults.standard.set(today, forKey: self.recoveryLockedDateKey)
 
             // Body Battery seed — use whatever recovery server has given us
-            if self.recoveryScore > 0 {
+            // v106 fix: was `> 0` — but 0 is a valid recovery (alcohol/burnout).
+            // Use a sentinel approach instead: check if the server fetched anything.
+            if self.recoveryScore >= 0 && self.recoveryLockedDate != nil {
                 let hrvDelta = hrvForCompute > 0 ? hrvForCompute - hrvBaseline : 0
                 let seed = (self.recoveryScore * 0.7) + 25.0 + (hrvDelta * 0.5)
                 self.bodyBattery = min(max(seed, 15), 100)
@@ -99,7 +101,9 @@ extension HealthEngine {
             let result = await SupabaseClient.shared.recomputeHealthMetrics()
             await MainActor.run {
                 guard let self else { return }
-                if let r = result?.recovery, r > 0 {
+                // v106 fix: was `r > 0` — but 0 is a valid recovery score on
+                // alcohol/burnout nights. nil is the no-data case; `if let` handles it.
+                if let r = result?.recovery, r >= 0 {
                     self.recoveryScore = round(r)
                     if r >= 67 { self.recoveryLabel = "Green" }
                     else if r >= 34 { self.recoveryLabel = "Yellow" }
