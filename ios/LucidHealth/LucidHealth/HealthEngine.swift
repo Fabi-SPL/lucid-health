@@ -52,6 +52,9 @@ class HealthEngine: ObservableObject {
     @Published var recoveryRHRContribution: Double = 0
     @Published var recoverySleepContribution: Double = 0
     @Published var recoveryRRContribution: Double = 0
+    // v106: server-stamped alcohol-night flag. 1.0 = detected, 0/nil = sober.
+    // Surfaces a 🍺 badge under the recovery ring so a low score has context.
+    @Published var alcoholImpact: Double = 0
 
     // Strain
     @Published var strainScore: Double = 0
@@ -472,7 +475,11 @@ class HealthEngine: ObservableObject {
             // Server can never be more stale than local — local is computed from
             // the same data and pushed to server, so server >= local in freshness.
             DispatchQueue.main.async {
-                if let r = scores["recovery"], r > 0 {
+                // v106 fix: was `r > 0` — but 0 is a valid recovery score (alcohol
+                // night, total burnout etc.). NULL is the "no data" case, and `if let`
+                // already rejects nil. Treating 0 as no-data made the app show
+                // yesterday's 75 on the May 23 drunk night when server had 0.
+                if let r = scores["recovery"], r >= 0 {
                     self.recoveryScore = round(r)
                     if r >= 67 { self.recoveryLabel = "Green" }
                     else if r >= 34 { self.recoveryLabel = "Yellow" }
@@ -480,6 +487,8 @@ class HealthEngine: ObservableObject {
                     UserDefaults.standard.set(r, forKey: self.recoveryScoreTodayKey)
                     print("[Health] Restored recovery from server: \(Int(r))")
                 }
+                // v106: alcohol-night flag from server (gives context to a low score)
+                self.alcoholImpact = scores["alcohol_impact"] ?? 0
                 if let hours = scores["sleep_hours"], hours > 0 {
                     let durationScore: Double = hours >= 7 ? 90 : hours >= 6 ? 70 : hours >= 5 ? 50 : 30
                     self.sleepScore = round(durationScore)
