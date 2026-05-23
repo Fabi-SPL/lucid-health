@@ -478,6 +478,14 @@ struct TodayView: View {
                 .statusGlow(DS.Colors.recoveryColor(engine.recoveryScore), intensity: 0.7)
                 .padding(.top, DS.Spacing.sm)
 
+            // v106: alcohol-night chip. Gives context to a low score so the
+            // number doesn't read as "the app is broken" when it's actually
+            // "your nervous system is wrecked from drinking".
+            if engine.alcoholImpact > 0 {
+                AlcoholNightChip()
+                    .padding(.horizontal, DS.Spacing.lg)
+            }
+
             // 14-day recovery trend — makes the (real, 9-100 swinging) score's
             // movement visible so a correct-but-varying number stops reading
             // as "stuck at 60".
