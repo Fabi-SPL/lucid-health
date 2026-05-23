@@ -104,36 +104,62 @@
       "iconURL": "https://app.lucid-ai.app/icon-512.png",
       "tintColor": "#8B5CF6",
       "screenshotURLs": [],
-      "version": "1.0.15",
-      "buildVersion": "15",
-      "date": "2026-05-21T14:09:40+00:00",
-      "downloadURL": "https://db.speed-running-life.com/storage/v1/object/public/ipa-builds/LucidHealth-15.ipa",
-      "size": 3142634,
+      "version": "1.0.16",
+      "buildVersion": "16",
+      "date": "2026-05-23T19:44:54+00:00",
+      "downloadURL": "https://db.speed-running-life.com/storage/v1/object/public/ipa-builds/LucidHealth-16.ipa",
+      "size": 3148412,
       "minOSVersion": "26.0",
       "versions": [
         {
-          "version": "1.0.15",
-          "buildVersion": "15",
-          "date": "2026-05-21T14:09:40+00:00",
-          "size": 3142634,
-          "downloadURL": "https://db.speed-running-life.com/storage/v1/object/public/ipa-builds/LucidHealth-15.ipa",
-          "localizedDescription": "Build 15",
+          "version": "1.0.16",
+          "buildVersion": "16",
+          "date": "2026-05-23T19:44:54+00:00",
+          "size": 3148412,
+          "downloadURL": "https://db.speed-running-life.com/storage/v1/object/public/ipa-builds/LucidHealth-16.ipa",
+          "localizedDescription": "Build 16",
           "minOSVersion": "26.0"
         }
       ],
       "appPermissions": {
         "entitlements": [
-          { "name": "com.apple.security.application-groups" }
+          {
+            "name": "com.apple.security.application-groups"
+          }
         ],
         "privacy": [
-          { "name": "NSBluetoothAlwaysUsageDescription", "usageDescription": "Connects to Whoop via BLE." },
-          { "name": "NSBluetoothPeripheralUsageDescription", "usageDescription": "Connects to Whoop via BLE (legacy peripheral key)." },
-          { "name": "NSCameraUsageDescription", "usageDescription": "Take photos of meals." },
-          { "name": "NSPhotoLibraryUsageDescription", "usageDescription": "Pick existing meal photos." },
-          { "name": "NSHealthShareUsageDescription", "usageDescription": "Reads health data from Apple Health for body-state correlation." },
-          { "name": "NSHealthUpdateUsageDescription", "usageDescription": "Writes recovery and HRV data back to Apple Health." },
-          { "name": "NSLocationWhenInUseUsageDescription", "usageDescription": "Tags meals and body-state snapshots with location." },
-          { "name": "NSLocationAlwaysAndWhenInUseUsageDescription", "usageDescription": "Background location for activity context (rides, walks)." }
+          {
+            "name": "NSBluetoothAlwaysUsageDescription",
+            "usageDescription": "Connects to Whoop via BLE."
+          },
+          {
+            "name": "NSBluetoothPeripheralUsageDescription",
+            "usageDescription": "Connects to Whoop via BLE (legacy peripheral key)."
+          },
+          {
+            "name": "NSCameraUsageDescription",
+            "usageDescription": "Take photos of meals."
+          },
+          {
+            "name": "NSPhotoLibraryUsageDescription",
+            "usageDescription": "Pick existing meal photos."
+          },
+          {
+            "name": "NSHealthShareUsageDescription",
+            "usageDescription": "Reads health data from Apple Health for body-state correlation."
+          },
+          {
+            "name": "NSHealthUpdateUsageDescription",
+            "usageDescription": "Writes recovery and HRV data back to Apple Health."
+          },
+          {
+            "name": "NSLocationWhenInUseUsageDescription",
+            "usageDescription": "Tags meals and body-state snapshots with location."
+          },
+          {
+            "name": "NSLocationAlwaysAndWhenInUseUsageDescription",
+            "usageDescription": "Background location for activity context (rides, walks)."
+          }
         ]
       }
     }
