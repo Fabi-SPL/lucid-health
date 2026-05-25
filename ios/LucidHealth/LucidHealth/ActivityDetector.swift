@@ -151,19 +151,34 @@ class ActivityDetector: ObservableObject {
         overnightHRBuffer.removeAll { $0.time < timestamp.addingTimeInterval(-overnightBufferDuration) }
 
         // Run all detectors
-        // v99 — sauna + cold_plunge auto-detection disabled. Per Fabi (2026-05-08):
-        // "I don't have a sauna and nor do I do cold plunges right now if I'll
-        // just log it manually". The HR-only signature (sustained 70-100 bpm with
-        // slow climb) was firing on too many normal activities — walking,
-        // sitting in a warm room, mild physical work — producing 42 false
-        // positives in April-May 2026. Keep the detector code dormant so it
-        // can be re-enabled if Fabi gets back into the routine.
+        //
+        // v110 (2026-05-25) — ALL threshold-based HR/HRV auto-detectors disabled
+        // per Fabi's 2026-05-25 feedback: "we kind of need to delete every single
+        // auto-detection ... it's like kind of 80% correct but I don't want it
+        // to be 80% correct I want it to be 99 or like almost 100% correct."
+        //
+        // Diagnosis: HR-threshold heuristics are a commercial-product pattern
+        // (need to label activities for users who don't know what they did).
+        // Single-user systems get higher accuracy via multi-signal AND-rules
+        // (CMMotionActivity + CoreLocation visits + FocusFilterIntent + HealthKit
+        // environmental audio) and end-of-day LLM interpretation against the
+        // raw signal stream.
+        //
+        // The detector code stays dormant so the per-detector implementations
+        // can be re-purposed later as Layer-1 *feature* writers (writing to a
+        // separate features table that Layer-3 LLM consumes), not as authorities
+        // over user-facing activity events.
+        //
+        // See research report: knowledge_entries id 2278cfe5-21e4 — "Single-User
+        // High-Detail Activity Inference Beyond Commercial Auto-Detection".
+        //
+        // v99 (still): sauna + cold_plunge stayed off since 2026-05-08.
         // processSaunaDetector(hr: hr, timestamp: timestamp)
         // processColdPlungeDetector(hr: hr, timestamp: timestamp)
-        processStressDetector(hr: hr, rmssd: rmssd, timestamp: timestamp)
-        processExerciseDetector(hr: hr, timestamp: timestamp)
-        processNapDetector(hr: hr, rmssd: rmssd, timestamp: timestamp)
-        processFocusWorkDetector(hr: hr, rmssd: rmssd, timestamp: timestamp)
+        // processStressDetector(hr: hr, rmssd: rmssd, timestamp: timestamp)
+        // processExerciseDetector(hr: hr, timestamp: timestamp)
+        // processNapDetector(hr: hr, rmssd: rmssd, timestamp: timestamp)
+        // processFocusWorkDetector(hr: hr, rmssd: rmssd, timestamp: timestamp)
 
         // Update status
         updateStatus()
