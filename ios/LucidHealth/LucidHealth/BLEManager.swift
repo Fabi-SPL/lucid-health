@@ -271,6 +271,10 @@ class BLEManager: NSObject, ObservableObject {
 
     // MARK: - Battery Alert (once per depletion cycle, resets above 50%)
     private var batteryAlertSent = false
+    // Strap buzz guard — same lifecycle as batteryAlertSent. Without this the
+    // strap was vibrating non-stop because the buzz block (line 2506) was
+    // firing every battery reading (every few seconds).
+    private var lowBatteryBuzzSent = false
 
     // MARK: - Stored peripheral identifier for reconnection
     private let peripheralIdKey = "lucid_whoop_peripheral_id"
@@ -2501,11 +2505,15 @@ extension BLEManager: CBPeripheralDelegate {
                     self.sendLowBatteryNotification(level)
                 } else if level > 50 {
                     self.batteryAlertSent = false  // Reset flag when charged back up
+                    self.lowBatteryBuzzSent = false  // Reset strap buzz flag too
                 }
 
-                // Low battery alert: buzz if < 15%
-                if level < 15 && level > 0 {
-                    self.log("LOW BATTERY \(String(format: "%.0f", level))% — buzzing alert")
+                // Low battery STRAP BUZZ — once per depletion cycle (was firing every
+                // battery reading = strap vibrating non-stop, infuriating). Guarded
+                // identically to batteryAlertSent. Reset when battery > 50%.
+                if level < 15 && level > 0 && !self.lowBatteryBuzzSent {
+                    self.lowBatteryBuzzSent = true
+                    self.log("LOW BATTERY \(String(format: "%.0f", level))% — buzzing alert (once)")
                     self.sendHapticRaw(1)
                     self.bleQueue.asyncAfter(deadline: .now() + 1.5) { self.sendHapticRaw(1) }
                     self.bleQueue.asyncAfter(deadline: .now() + 3.0) { self.forceStopHaptics() }
@@ -3428,10 +3436,11 @@ extension BLEManager: CBPeripheralDelegate {
         // Cancel any existing fallback chain before re-scheduling.
         cancelFallbackAlarm()
 
-        // Chain 15 UNCalendarNotificationTriggers, each offset by 2 seconds, so
-        // the user gets sustained vibration (~30s of buzz). A single notification
-        // fires only ONE haptic which isn't wakeable. defaultCritical sound +
-        // .timeSensitive bypasses silent/DND.
+        // v108: SINGLE fallback alarm (was 15 chained — Fabi feedback 2026-05-25:
+        // "30 notifications is the dumbest thing"). One UNCalendarNotificationTrigger
+        // with defaultCritical sound + .timeSensitive bypasses silent/DND. If the
+        // first pulse doesn't wake him, the spam-chain wouldn't have helped anyway
+        // (and only frustrates after he's already up).
         let center = UNUserNotificationCenter.current()
         let calendar = Calendar.current
         let now = Date()
@@ -3445,44 +3454,39 @@ extension BLEManager: CBPeripheralDelegate {
             baseDate = calendar.date(byAdding: .day, value: 1, to: baseDate) ?? baseDate
         }
 
-        for i in 0..<15 {
-            let fireDate = baseDate.addingTimeInterval(Double(i) * 2.0)
-            let comps = calendar.dateComponents(
-                [.year, .month, .day, .hour, .minute, .second],
-                from: fireDate
-            )
-            let content = UNMutableNotificationContent()
-            content.title = "\u{23F0} Wake Up"
-            content.body = "Smart alarm fallback. Time to get up!"
-            content.sound = UNNotificationSound.defaultCritical
-            content.interruptionLevel = .timeSensitive
-            content.threadIdentifier = fallbackAlarmId
-            // repeats:false so each pulse fires once at its specific datetime;
-            // a `repeats:true` calendar trigger would only allow daily granularity.
-            let trigger = UNCalendarNotificationTrigger(dateMatching: comps, repeats: false)
-            let request = UNNotificationRequest(
-                identifier: "\(fallbackAlarmId)_\(i)",
-                content: content,
-                trigger: trigger
-            )
-            center.add(request) { [weak self] error in
-                if let error = error, i == 0 {
-                    self?.log("Fallback alarm schedule FAILED: \(error.localizedDescription)")
-                }
+        // v108: single pulse (was for i in 0..<15)
+        let comps = calendar.dateComponents(
+            [.year, .month, .day, .hour, .minute, .second],
+            from: baseDate
+        )
+        let content = UNMutableNotificationContent()
+        content.title = "\u{23F0} Wake Up"
+        content.body = "Smart alarm fallback. Time to get up!"
+        content.sound = UNNotificationSound.defaultCritical
+        content.interruptionLevel = .timeSensitive
+        content.threadIdentifier = fallbackAlarmId
+        let trigger = UNCalendarNotificationTrigger(dateMatching: comps, repeats: false)
+        let request = UNNotificationRequest(
+            identifier: "\(fallbackAlarmId)_0",
+            content: content,
+            trigger: trigger
+        )
+        center.add(request) { [weak self] error in
+            if let error = error {
+                self?.log("Fallback alarm schedule FAILED: \(error.localizedDescription)")
             }
         }
-        log("Fallback alarm chain scheduled at \(endHour):\(String(format: "%02d", endMin)) (15 pulses, 2s spacing)")
+        log("Fallback alarm scheduled at \(endHour):\(String(format: "%02d", endMin)) (single pulse)")
     }
 
-    /// Cancel the fallback alarm chain (called when smart alarm fires successfully).
-    /// Removes all 15 chained pulses by ID.
+    /// Cancel the fallback alarm (called when smart alarm fires successfully).
+    /// Removes the pulse + any legacy chained ids from older installs (0..<15).
     func cancelFallbackAlarm() {
         let center = UNUserNotificationCenter.current()
+        // Clear current single-pulse id + legacy 15-chain ids + bare-id form
         let ids = (0..<15).map { "\(fallbackAlarmId)_\($0)" }
-        // Also remove the legacy single-id form in case it's still pending from
-        // pre-chain installs.
         center.removePendingNotificationRequests(withIdentifiers: ids + [fallbackAlarmId])
-        log("Fallback alarm chain cancelled")
+        log("Fallback alarm cancelled")
     }
 
     /// Push notification at 20% battery so Fabi can charge before bed (prevents overnight data gaps)
@@ -3501,14 +3505,15 @@ extension BLEManager: CBPeripheralDelegate {
     }
 
     /// Send an immediate notification when smart alarm fires (shows on lock screen).
-    /// Chains 20 notifications, 2 seconds apart, to produce a sustained vibration
-    /// that's actually wakeable — a single notification fires only ONE haptic which
-    /// isn't enough to wake from sleep. defaultCritical bypasses silent/DND.
+    /// v108: SINGLE notification (was 20 chained — Fabi feedback 2026-05-25). The
+    /// strap haptic ramp at line 356 already provides progressive wrist vibration
+    /// for waking; the phone notification just needs to ping once + show on lock
+    /// screen. defaultCritical sound + .timeSensitive bypasses silent/DND.
     private func sendAlarmNotification(stage: HealthEngine.SleepStage) {
         scheduleAlarmBuzzChain(
             title: "\u{1F305} Good Morning",
             body: "Smart alarm: waking you from \(stage.rawValue) sleep",
-            count: 20,
+            count: 1,
             spacingSec: 2,
             firstDelaySec: 0.1,
             idPrefix: "lucid_smart_alarm"
