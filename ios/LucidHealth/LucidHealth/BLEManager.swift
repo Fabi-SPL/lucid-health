@@ -407,8 +407,15 @@ class BLEManager: NSObject, ObservableObject {
             self.supabase.notifyWakeUp { success in
                 self.log("Wake-up notification to Lucid: \(success ? "OK" : "FAILED")")
             }
-            // Run overnight analysis (alcohol detection, etc.)
-            self.activityDetector.processWakeUp()
+            // v111 (2026-05-27) — Alcohol detection moved server-side.
+            // Postgres `detect_overnight_alcohol()` RPC runs in v106 sleep
+            // detection and stamps `health_metrics.alcohol_impact`. The chip
+            // already reads `scores["alcohol_impact"]` from the recompute
+            // result above. iOS = stupid transmitter. No more `source='auto'`
+            // activity writes from this path. Overnight buffer in
+            // ActivityDetector.processReading still accumulates (harmless,
+            // dormant — can be re-armed later if server detection regresses).
+            // self.activityDetector.processWakeUp()
 
             // v100 architecture migration — sleep score + recovery are now
             // computed server-side. Local stamp the wake time for UI, then fire
