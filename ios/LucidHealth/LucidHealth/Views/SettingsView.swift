@@ -23,6 +23,12 @@ struct SettingsView: View {
                     .opacity(appeared ? 1 : 0)
                     .animation(DS.Anim.stagger(index: 0), value: appeared)
 
+                // Personalization — weight (BMR/TDEE/BAC inputs)
+                PersonalizationCard()
+                    .offset(y: appeared ? 0 : 20)
+                    .opacity(appeared ? 1 : 0)
+                    .animation(DS.Anim.stagger(index: 1), value: appeared)
+
                 // BLE control with full-width pill reconnect
                 BLEControlCard(bleManager: bleManager)
                     .offset(y: appeared ? 0 : 20)
@@ -1004,5 +1010,142 @@ private struct DevCard: View {
         .accentColor(DS.Colors.textFaint)
         .padding(DS.Spacing.lg)
         .glassDefault()
+    }
+}
+
+// MARK: - Personalization Card
+
+/// Weight + derived BMR/TDEE — feeds calorie targets, alcohol BAC calc,
+/// and strain-per-kg metrics. Persisted via @AppStorage (UserDefaults key
+/// `lucid_user_weight_kg`) so any engine can read it without a singleton.
+private struct PersonalizationCard: View {
+    @AppStorage(PersonalizationCard.weightKey) private var weightKg: Double = 76.0
+    @State private var weightText: String = ""
+    @FocusState private var weightFocused: Bool
+    @State private var savedFlash = false
+
+    static let weightKey = "lucid_user_weight_kg"
+
+    // Mifflin-St Jeor BMR (male, age 20, ~178cm). Height is a fixed assumption
+    // for now — wire a real input when more profile fields land.
+    private var bmr: Int {
+        let height: Double = 178
+        let age: Double = 20
+        let value = 10 * weightKg + 6.25 * height - 5 * age + 5
+        return Int(value.rounded())
+    }
+
+    private var tdee: Int {
+        // moderate activity factor 1.55
+        Int((Double(bmr) * 1.55).rounded())
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: DS.Spacing.md) {
+            SectionHeader(
+                icon: "person.text.rectangle",
+                title: "PERSONALIZATION",
+                iconColor: DS.Colors.violet
+            )
+
+            HStack {
+                Text("Weight")
+                    .font(.system(size: 13, weight: .medium))
+                    .foregroundStyle(DS.Colors.textSecondary)
+                Spacer()
+                HStack(spacing: 4) {
+                    TextField("76.0", text: $weightText)
+                        .keyboardType(.decimalPad)
+                        .multilineTextAlignment(.trailing)
+                        .focused($weightFocused)
+                        .font(.system(size: 18, weight: .bold, design: .rounded))
+                        .foregroundStyle(DS.Colors.textPrimary)
+                        .frame(width: 70)
+                        .monospacedDigit()
+                        .onSubmit { commit() }
+                        .onChange(of: weightFocused) { _, focused in
+                            if !focused { commit() }
+                        }
+                    Text("kg")
+                        .font(.system(size: 13, weight: .medium))
+                        .foregroundStyle(DS.Colors.textMuted)
+                }
+            }
+
+            if savedFlash {
+                HStack(spacing: 4) {
+                    Image(systemName: "checkmark.circle.fill")
+                        .font(.system(size: 11))
+                        .foregroundStyle(DS.Colors.success)
+                    Text("Saved")
+                        .font(.system(size: 11, weight: .medium))
+                        .foregroundStyle(DS.Colors.success)
+                    Spacer()
+                }
+                .transition(.opacity)
+            }
+
+            // Derived metrics — preview value of the input
+            HStack(spacing: DS.Spacing.sm) {
+                derivedTile(label: "BMR", value: "\(bmr)", unit: "kcal/day")
+                derivedTile(label: "TDEE", value: "\(tdee)", unit: "× 1.55")
+            }
+            .padding(.top, 2)
+
+            Text("Used by calorie targets, alcohol BAC estimate, and strain-per-kg.")
+                .font(.system(size: 10))
+                .foregroundStyle(DS.Colors.textMuted)
+                .padding(.top, 2)
+        }
+        .padding(DS.Spacing.md)
+        .glassDefault()
+        .onAppear {
+            weightText = formatWeight(weightKg)
+        }
+    }
+
+    private func commit() {
+        let cleaned = weightText
+            .replacingOccurrences(of: ",", with: ".")
+            .trimmingCharacters(in: .whitespaces)
+        guard let value = Double(cleaned), value >= 30, value <= 250 else {
+            weightText = formatWeight(weightKg)
+            return
+        }
+        weightKg = value
+        weightText = formatWeight(value)
+        withAnimation { savedFlash = true }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2) {
+            withAnimation { savedFlash = false }
+        }
+    }
+
+    private func formatWeight(_ v: Double) -> String {
+        // 1 decimal for non-integer, no decimal for whole numbers (76.0 → "76")
+        v == v.rounded() ? String(Int(v)) : String(format: "%.1f", v)
+    }
+
+    @ViewBuilder
+    private func derivedTile(label: String, value: String, unit: String) -> some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Text(label)
+                .font(.system(size: 9, weight: .bold))
+                .foregroundStyle(DS.Colors.textMuted)
+                .tracking(0.6)
+            Text(value)
+                .font(.system(size: 18, weight: .heavy, design: .rounded))
+                .foregroundStyle(DS.Colors.textPrimary)
+                .monospacedDigit()
+            Text(unit)
+                .font(.system(size: 9))
+                .foregroundStyle(DS.Colors.textFaint)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.horizontal, DS.Spacing.sm)
+        .padding(.vertical, 8)
+        .background(
+            RoundedRectangle(cornerRadius: DS.Radius.sm, style: .continuous)
+                .fill(DS.Colors.violet.opacity(0.06))
+        )
     }
 }
