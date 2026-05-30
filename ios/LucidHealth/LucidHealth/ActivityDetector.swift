@@ -688,8 +688,12 @@ class ActivityDetector: ObservableObject {
             self.activeDetections.append(detection)
         }
 
-        // Send push notification
-        sendActivityNotification(detection: detection)
+        // v112 (2026-05-30) — iOS-local "Activity Detected" banner disabled.
+        // v110 commented out the processors in processReading() but the
+        // notification call here would still fire if any other path called
+        // addDetection (e.g. history replay, future re-arm). Belt-and-suspenders:
+        // kill the notification call too. iOS = stupid transmitter.
+        // sendActivityNotification(detection: detection)
     }
 
     private func removeDetection(type: String) {

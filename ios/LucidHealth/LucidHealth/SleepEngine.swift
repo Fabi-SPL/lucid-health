@@ -260,7 +260,12 @@ extension HealthEngine {
                 self.markSleepStart()
 
                 if wasAwake {
-                    self.sendSleepNotification(stage: newStage)
+                    // v112 (2026-05-30) — iOS-local "😴 Sleep Detected" banner
+                    // disabled. iOS = stupid transmitter, no auto-detection
+                    // notifications. Sleep stage still detected internally for
+                    // sleepDetected state (AppMode wake-up logic depends on it),
+                    // just no user-facing notification fires.
+                    // self.sendSleepNotification(stage: newStage)
                 }
                 if let lastNotif = self.lastWakeUpNotification {
                     let hoursSince = Date().timeIntervalSince(lastNotif) / 3600
