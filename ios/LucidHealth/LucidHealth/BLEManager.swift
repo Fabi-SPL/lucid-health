@@ -3286,14 +3286,17 @@ extension BLEManager: CBPeripheralDelegate {
         // End Live Activity
         stopLiveActivity()
 
-        // Post-exercise cognitive window alert (Gapin 2022 meta-analysis)
-        // Peak ADHD cognitive boost: 2-10 min post-vigorous exercise (SMD=0.23)
-        if type == "exercise" {
-            let duration = Date().timeIntervalSince(startTime)
-            if duration >= 10 * 60 { // >10 min exercise = significant effect
-                scheduleExerciseCognitiveAlert()
-            }
-        }
+        // v112 (2026-05-30) — auto-detected-exercise → "🧠 Peak Focus Window"
+        // alert disabled. Auto-detection itself is dead since v110 but this
+        // call would still have fired on a manually-ended auto session.
+        // Manual exercise path below (line ~3387) preserves the alert because
+        // it's user-initiated (double-tap mark, not algorithm detection).
+        // if type == "exercise" {
+        //     let duration = Date().timeIntervalSince(startTime)
+        //     if duration >= 10 * 60 {
+        //         scheduleExerciseCognitiveAlert()
+        //     }
+        // }
 
         DispatchQueue.main.async {
             self.doubleTapMessage = "\(type) ended"
