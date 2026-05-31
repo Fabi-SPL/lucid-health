@@ -218,6 +218,7 @@ class BLEManager: NSObject, ObservableObject {
     private var isDownloadingHistory = false
     private var historyBuffer: [HRReading] = []
     private var historyBatchCount = 0
+    private var historyRawCaptureCount = 0  // v113 — bounds raw-hex logging of history packets per sync
     private var historySyncTimer: Timer?
     private let lastSyncKey = "lucid_last_sync_timestamp"
 
@@ -1135,9 +1136,38 @@ class BLEManager: NSObject, ObservableObject {
                     }
                 }
 
-                p.writeValue(WhoopProtocol.requestHistoryPacket(), for: c, type: .withResponse)
-                self.log("manualBackfill: requestHistoryPacket sent — waiting for strap…")
+                // v113 — preamble-ordered request (CMD 7→35→10→22) replaces the bare
+                // CMD 22 that raced the hello handshake on firmware 41.x.
+                self.sendHistoryRequestWithPreamble(p, c, trigger: "manual-72h")
             }
+        }
+    }
+
+    /// v113 — Gen4 history preamble. Firmware 41.x (Harvard 41.17.6.0) stalls or
+    /// returns an unparseable dump if CMD 22 (request history) arrives before the
+    /// hello handshake completes. Our connect sequence raced: CMD 22 could fire at
+    /// ~t+2.5 while helloHarvard landed at ~t+3.0. This sends the community-verified
+    /// ordered preamble (CMD 7 version → CMD 35 hello → CMD 10 set-clock → CMD 22),
+    /// isolated to the history path so live-streaming timing is untouched.
+    /// Sources: jogolden/whoomp connectToWhoop(), bWanShiTong/openwhoop.
+    private func sendHistoryRequestWithPreamble(_ p: CBPeripheral, _ c: CBCharacteristic, trigger: String) {
+        historyRawCaptureCount = 0
+        p.writeValue(WhoopProtocol.firmwareVersionPacket(), for: c, type: .withResponse)
+        bleQueue.asyncAfter(deadline: .now() + 0.4) { [weak self] in
+            guard let self else { return }
+            p.writeValue(WhoopProtocol.helloHarvardPacket(), for: c, type: .withResponse)
+            self.log("history preamble [\(trigger)]: hello sent")
+        }
+        bleQueue.asyncAfter(deadline: .now() + 0.8) { [weak self] in
+            guard let self else { return }
+            p.writeValue(WhoopProtocol.setClockPacket(), for: c, type: .withResponse)
+            self.log("history preamble [\(trigger)]: setClock sent")
+        }
+        bleQueue.asyncAfter(deadline: .now() + 1.2) { [weak self] in
+            guard let self else { return }
+            p.writeValue(WhoopProtocol.requestHistoryPacket(), for: c, type: .withResponse)
+            self.supabase.pushDebugLog(key: "history_preamble_sent", value: "trigger=\(trigger) order=ver,hello,setclock,req v113")
+            self.log("history request sent after v113 preamble [\(trigger)] — waiting for strap…")
         }
     }
 
@@ -1202,8 +1232,9 @@ class BLEManager: NSObject, ObservableObject {
                     self.bleQueue.async { self.startRealtimeStreaming() }
                     return
                 }
-                p.writeValue(WhoopProtocol.requestHistoryPacket(), for: c, type: .withResponse)
-                self.log("History download requested — waiting for strap response...")
+                // v113 — preamble-ordered request (CMD 7→35→10→22) replaces the bare
+                // CMD 22 that raced the hello handshake on firmware 41.x.
+                self.sendHistoryRequestWithPreamble(p, c, trigger: "auto-reconnect")
             }
         }
     }
@@ -1372,6 +1403,29 @@ class BLEManager: NSObject, ObservableObject {
     private func handleHistoryData(_ packet: WhoopPacket) {
         guard isDownloadingHistory else { return }
 
+        // v113 — capture ground-truth bytes for the first 40 history packets per
+        // sync (shared budget with the unknown-type branch). Firmware 41.x appears
+        // to dump 93-byte decode_5c sensor packets (15 IEEE floats, HR NOT cooked
+        // in-packet) instead of the old ~24-byte <LHLB> HR records our parser
+        // assumes — so parseHistoricalRecord reads byte[14] (float data on a 93B
+        // packet) → ~0 → filtered at the hr>0 check below → 0 records buffered.
+        // Log size + seq (version discriminator) + the byte the parser treats as
+        // HR + the parse outcome so the next build fixes the layout with zero
+        // guessing. Pure diagnostic — behaviour below is unchanged.
+        if historyRawCaptureCount < 40 {
+            historyRawCaptureCount += 1
+            let d = packet.data
+            let s = d.startIndex
+            let hex = d.prefix(96).map { String(format: "%02x", $0) }.joined()
+            let hrByte14 = d.count >= 15 ? Int(d[s + 14]) : -1
+            let parsed = WhoopProtocol.parseHistoricalRecord(data: d)
+            let outcome = parsed == nil ? "nil" : "hr=\(parsed!.heartRate) rr=\(parsed!.rrIntervals.count)"
+            supabase.pushDebugLog(
+                key: "history_raw_packet",
+                value: "n=\(historyRawCaptureCount) type=\(packet.type) seq=\(packet.seq) cmd=\(packet.cmd) len=\(d.count) hrByte14=\(hrByte14) parse=\(outcome) hex=\(hex)"
+            )
+        }
+
         // Parse the record — we only need HR and RR values
         // Timestamps will be distributed evenly across the gap later
         if let reading = WhoopProtocol.parseHistoricalRecord(data: packet.data) {
@@ -1400,15 +1454,34 @@ class BLEManager: NSObject, ObservableObject {
             supabase.pushDebugLog(key: "history_sync_batch_start", value: "trigger=\(trigger) batch=\(historyBatchCount) running_total=\(historyBuffer.count)")
 
         case 2: // META_HISTORY_END — ack and request next batch
-            if let trim = WhoopProtocol.parseHistoryMetadata(data: packet.data) {
-                log("History batch \(historyBatchCount) ended (trim: \(trim)), sending ACK...")
-                supabase.pushDebugLog(key: "history_sync_batch_end", value: "trigger=\(trigger) batch=\(historyBatchCount) trim=\(trim) running_total=\(historyBuffer.count)")
+            // v113 — trim-offset fix + diagnostic. parseHistoryMetadata reads trim
+            // at data[8:12] (<LHHL, unk=2B). But the record parser — whose HR@14 the
+            // firmware-41 research confirms correct — implies the shared header is
+            // unix4+subsec2+unk4 (10 bytes), so trim belongs at [10:14]. A wrong
+            // trim froze at 655360 across 68 batches → strap re-sent batch 1 forever
+            // → 0 records. We now ACK with [10:14] and log BOTH candidates so one
+            // real sync proves which offset the firmware actually uses.
+            let d = packet.data
+            let s = d.startIndex
+            let metaHex = d.prefix(32).map { String(format: "%02x", $0) }.joined()
+            let trim8: UInt32? = d.count >= 12
+                ? (UInt32(d[s+8]) | (UInt32(d[s+9]) << 8) | (UInt32(d[s+10]) << 16) | (UInt32(d[s+11]) << 24))
+                : nil
+            let trim10: UInt32? = d.count >= 14
+                ? (UInt32(d[s+10]) | (UInt32(d[s+11]) << 8) | (UInt32(d[s+12]) << 16) | (UInt32(d[s+13]) << 24))
+                : nil
+            let t8str = trim8.map { "\($0)" } ?? "nil"
+            let t10str = trim10.map { "\($0)" } ?? "nil"
+            supabase.pushDebugLog(key: "history_meta_raw", value: "trigger=\(trigger) batch=\(historyBatchCount) len=\(d.count) hex=\(metaHex) trim_at8=\(t8str) trim_at10=\(t10str)")
+            if let trim = trim10 ?? trim8 {
+                log("History batch \(historyBatchCount) ended (trim10=\(t10str) trim8=\(t8str)), ACKing with \(trim)...")
+                supabase.pushDebugLog(key: "history_sync_batch_end", value: "trigger=\(trigger) batch=\(historyBatchCount) ack_trim=\(trim) running_total=\(historyBuffer.count)")
                 if let p = peripheral, let c = cmdToStrap {
                     p.writeValue(WhoopProtocol.historyAckPacket(trim: trim), for: c, type: .withResponse)
                 }
             } else {
-                log("History batch end — couldn't parse metadata")
-                supabase.pushDebugLog(key: "history_sync_batch_end_unparsed", value: "trigger=\(trigger) batch=\(historyBatchCount)")
+                log("History batch end — couldn't parse metadata (len=\(d.count))")
+                supabase.pushDebugLog(key: "history_sync_batch_end_unparsed", value: "trigger=\(trigger) batch=\(historyBatchCount) hex=\(metaHex)")
             }
 
         case 3: // META_HISTORY_COMPLETE — all done!
@@ -3903,6 +3976,17 @@ extension BLEManager: CBPeripheralDelegate {
                     let hex = packet.data.prefix(24).map { String(format: "%02x", $0) }.joined(separator: " ")
                     log("  HEX: \(hex)")
                 }
+            } else if historyRawCaptureCount < 40 {
+                // v113 — during history sync we previously dropped non-47/49 packets
+                // SILENTLY. If firmware 41.x routes HR history through a different
+                // packet type, that's exactly the byte stream we need — capture it
+                // (bounded, shared budget) instead of swallowing it.
+                historyRawCaptureCount += 1
+                let hex = packet.data.prefix(96).map { String(format: "%02x", $0) }.joined()
+                supabase.pushDebugLog(
+                    key: "history_misc_packet",
+                    value: "n=\(historyRawCaptureCount) type=\(packet.type) seq=\(packet.seq) cmd=\(packet.cmd) len=\(packet.data.count) hex=\(hex)"
+                )
             }
             // Capture unknown packets when optical mode is active — may contain SpO2 data
             captureOpticalPacket(type: packet.type, cmd: packet.cmd, data: packet.data)
