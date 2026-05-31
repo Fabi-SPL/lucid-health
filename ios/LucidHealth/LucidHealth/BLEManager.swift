@@ -1143,32 +1143,21 @@ class BLEManager: NSObject, ObservableObject {
         }
     }
 
-    /// v113 — Gen4 history preamble. Firmware 41.x (Harvard 41.17.6.0) stalls or
-    /// returns an unparseable dump if CMD 22 (request history) arrives before the
-    /// hello handshake completes. Our connect sequence raced: CMD 22 could fire at
-    /// ~t+2.5 while helloHarvard landed at ~t+3.0. This sends the community-verified
-    /// ordered preamble (CMD 7 version → CMD 35 hello → CMD 10 set-clock → CMD 22),
-    /// isolated to the history path so live-streaming timing is untouched.
-    /// Sources: jogolden/whoomp connectToWhoop(), bWanShiTong/openwhoop.
+    /// v114 — REVERTED the v113 preamble. Live logs proved it was a REGRESSION:
+    /// the re-sent helloHarvard (CMD 35) mid-session caused the strap to accept the
+    /// request (sent batch START) then go SILENT — zero data packets, no END marker
+    /// — until the 120s timeout. The pre-v113 bare CMD 22 at least cycled 68
+    /// START/END batches. Theory: re-sending hello resets the strap's GATT notify
+    /// state, so every notification after START is lost. runConnectionSequence
+    /// already sends the 7→35→10 handshake ONCE at connect — that is the correct
+    /// place; we must NOT re-send it per history request. So this now sends the bare
+    /// history request (the known-cycling baseline) and just resets the raw-capture
+    /// counter. Name kept to avoid churning the two call sites.
     private func sendHistoryRequestWithPreamble(_ p: CBPeripheral, _ c: CBCharacteristic, trigger: String) {
         historyRawCaptureCount = 0
-        p.writeValue(WhoopProtocol.firmwareVersionPacket(), for: c, type: .withResponse)
-        bleQueue.asyncAfter(deadline: .now() + 0.4) { [weak self] in
-            guard let self else { return }
-            p.writeValue(WhoopProtocol.helloHarvardPacket(), for: c, type: .withResponse)
-            self.log("history preamble [\(trigger)]: hello sent")
-        }
-        bleQueue.asyncAfter(deadline: .now() + 0.8) { [weak self] in
-            guard let self else { return }
-            p.writeValue(WhoopProtocol.setClockPacket(), for: c, type: .withResponse)
-            self.log("history preamble [\(trigger)]: setClock sent")
-        }
-        bleQueue.asyncAfter(deadline: .now() + 1.2) { [weak self] in
-            guard let self else { return }
-            p.writeValue(WhoopProtocol.requestHistoryPacket(), for: c, type: .withResponse)
-            self.supabase.pushDebugLog(key: "history_preamble_sent", value: "trigger=\(trigger) order=ver,hello,setclock,req v113")
-            self.log("history request sent after v113 preamble [\(trigger)] — waiting for strap…")
-        }
+        p.writeValue(WhoopProtocol.requestHistoryPacket(), for: c, type: .withResponse)
+        supabase.pushDebugLog(key: "history_request_sent_bare", value: "trigger=\(trigger) v114 bare-cmd22 (preamble reverted)")
+        log("History request (bare CMD 22) sent [\(trigger)] — waiting for strap…")
     }
 
     private func startHistoryDownload() {

@@ -895,7 +895,11 @@ class SupabaseClient {
         if let frag = row["sleep_fragmentation"] as? Double { result["sleep_fragmentation"] = frag }
         if let debt = row["sleep_debt_hours"] as? Double { result["sleep_debt_hours"] = debt }
         if let vo2 = row["vo2max_estimate"] as? Double { result["vo2max"] = vo2 }
-        if let alc = row["alcohol_impact"] as? Double { result["alcohol_impact"] = alc }
+        // v114 — alcohol_impact is a DATE-SPECIFIC event flag. Never carry it
+        // through the "fallback to most recent day" path: a Friday alcohol night
+        // must not badge Sunday's ring just because today's row wasn't fetched yet.
+        // Only surface it when these scores are genuinely today's.
+        if label != "fallback", let alc = row["alcohol_impact"] as? Double { result["alcohol_impact"] = alc }
         // Readiness + strain sub-scores (v45)
         if let rs = row["readiness_score"] as? Double { result["readiness_score"] = rs }
         if let sp = row["strain_physical"] as? Double { result["strain_physical"] = sp }
