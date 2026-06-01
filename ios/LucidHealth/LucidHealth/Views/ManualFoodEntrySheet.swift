@@ -218,49 +218,41 @@ struct ManualFoodEntrySheet: View {
 
     @ViewBuilder
     private var actionButton: some View {
-        if !hasAnalyzed {
-            Button { analyze() } label: {
+        // Save is ALWAYS available once there's a description — never gate
+        // logging behind Gemini. (Was: Save only after hasAnalyzed==true, so a
+        // Gemini 429 trapped the user with no way to log.) Analysis is optional
+        // enrichment that fills kcal/NOVA when the quota allows.
+        VStack(spacing: DS.Spacing.sm) {
+            Button { saveEntry() } label: {
                 HStack {
-                    if isAnalyzing {
+                    if isSaving {
                         ProgressView().tint(.white)
                     } else {
-                        Image(systemName: "sparkles")
-                        Text("Analyze with Gemini")
+                        Image(systemName: "checkmark")
+                        Text("Save meal")
                     }
                 }
                 .frame(maxWidth: .infinity)
             }
             .buttonStyle(GlassActionButtonStyle(tint: DS.Colors.violet, filled: true))
-            .disabled(!canAnalyze)
+            .disabled(isSaving || !canAnalyze)
             .opacity(canAnalyze ? 1.0 : 0.5)
-            .padding(.horizontal, DS.Spacing.md)
-        } else {
-            VStack(spacing: DS.Spacing.sm) {
-                Button { saveEntry() } label: {
-                    HStack {
-                        if isSaving {
-                            ProgressView().tint(.white)
-                        } else {
-                            Image(systemName: "checkmark")
-                            Text("Save meal")
-                        }
-                    }
-                    .frame(maxWidth: .infinity)
-                }
-                .buttonStyle(GlassActionButtonStyle(tint: DS.Colors.violet, filled: true))
-                .disabled(isSaving)
 
-                Button { reanalyze() } label: {
-                    HStack {
-                        Image(systemName: "arrow.clockwise")
-                        Text("Re-analyze")
+            Button { hasAnalyzed ? reanalyze() : analyze() } label: {
+                HStack {
+                    if isAnalyzing {
+                        ProgressView().tint(DS.Colors.violet)
+                    } else {
+                        Image(systemName: hasAnalyzed ? "arrow.clockwise" : "sparkles")
+                        Text(hasAnalyzed ? "Re-analyze" : "Analyze with Gemini (optional)")
                     }
-                    .frame(maxWidth: .infinity)
                 }
-                .buttonStyle(GlassActionButtonStyle(tint: DS.Colors.textSecondary, filled: false))
+                .frame(maxWidth: .infinity)
             }
-            .padding(.horizontal, DS.Spacing.md)
+            .buttonStyle(GlassActionButtonStyle(tint: DS.Colors.textSecondary, filled: false))
+            .disabled(!canAnalyze || isSaving)
         }
+        .padding(.horizontal, DS.Spacing.md)
     }
 
     // MARK: - Close
