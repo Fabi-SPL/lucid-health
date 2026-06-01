@@ -163,7 +163,7 @@ struct InsightsView: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
             }
             .glassDefault()
-            .buttonStyle(.plain)
+            .pressableCard()
         }
     }
 
