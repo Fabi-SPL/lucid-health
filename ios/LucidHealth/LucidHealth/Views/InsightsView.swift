@@ -11,7 +11,7 @@ struct InsightsView: View {
     @State private var isLoading = false
     @State private var entryCount = 0
     @State private var appeared = false
-    @State private var confidenceFilter: FoodPattern.ConfidenceTier? = .medium
+    @State private var confidenceFilter: FoodPattern.ConfidenceTier? = nil  // All — show strongest real patterns first
     @State private var showCoherenceDrill = false
 
     private static let minimumEntries = 14
@@ -42,14 +42,18 @@ struct InsightsView: View {
 
                     if isLoading {
                         LoadingState(label: "Analyzing patterns…")
-                    } else if entryCount < Self.minimumEntries {
-                        DataGateCard(entriesLogged: entryCount, required: Self.minimumEntries)
-                            .statusGlow(DS.Colors.violet, intensity: 0.6)
-                            .padding(.horizontal, DS.Spacing.md)
-                            .offset(y: appeared ? 0 : 20)
-                            .opacity(appeared ? 1 : 0)
-                            .animation(DS.Anim.stagger(index: 0), value: appeared)
                     } else {
+                        // Slim nudge when food logging is thin — but real health
+                        // correlations (HRV/RHR/sleep → recovery) still render below.
+                        if entryCount < Self.minimumEntries {
+                            DataGateCard(entriesLogged: entryCount, required: Self.minimumEntries)
+                                .statusGlow(DS.Colors.violet, intensity: 0.6)
+                                .padding(.horizontal, DS.Spacing.md)
+                                .offset(y: appeared ? 0 : 20)
+                                .opacity(appeared ? 1 : 0)
+                                .animation(DS.Anim.stagger(index: 0), value: appeared)
+                        }
+
                         // Confidence filter chips
                         ConfidenceFilterRow(selected: $confidenceFilter)
                             .offset(y: appeared ? 0 : 20)
@@ -168,15 +172,12 @@ struct InsightsView: View {
 
     private func loadInsights() async {
         isLoading = true
-        do {
-            let entries = try await SupabaseClient.shared.fetchRecentFoodEntries(limit: 90)
-            entryCount = entries.count
-            if entries.count >= Self.minimumEntries {
-                patterns = InsightEngine.compute(entries: entries, engine: bleManager.healthEngine)
-            }
-        } catch {
-            // empty state handles it
-        }
+        // Health-metric correlations don't need food data — fetch both, always compute.
+        let metrics = await SupabaseClient.shared.fetchDailyMetrics(days: 120)
+        var entries: [FoodEntry] = []
+        do { entries = try await SupabaseClient.shared.fetchRecentFoodEntries(limit: 90) } catch { }
+        entryCount = entries.count
+        patterns = InsightEngine.compute(entries: entries, metrics: metrics)
         isLoading = false
     }
 }
@@ -378,64 +379,151 @@ private struct MethodologyNote: View {
     }
 }
 
-// MARK: - Insight Engine
+// MARK: - Insight Engine (real correlations)
+//
+// REWRITE (2026-06-01): the old engine multiplied the CURRENT recovery score
+// by arbitrary constants (e.g. (1 - recoveryScore/100)*15) and called it a
+// "correlation" — pure theater. This computes real day-over-day relationships:
+//   • Recovery predictors (HRV / RHR / sleep → recovery) from health_metrics —
+//     hundreds of real days, live TODAY.
+//   • Food / alcohol → next-day recovery, food → sleep — real once food
+//     logging accumulates; honestly gated until then (no fake numbers).
 
 enum InsightEngine {
-    static func compute(entries: [FoodEntry], engine: HealthEngine) -> [FoodPattern] {
-        var result: [FoodPattern] = []
 
-        // Ultra-processed food pattern
-        let highNova = entries.filter { ($0.novaAvg ?? 0) >= 3.5 }
-        if highNova.count >= 5 {
-            result.append(FoodPattern(
-                title: "Ultra-processed food",
-                subtitle: "On days with NOVA >= 3.5 your recovery was generally lower.",
-                confidenceTier: highNova.count > 20 ? .high : .medium,
-                confidenceValue: min(Double(highNova.count) / 30.0, 1.0),
-                effectDescription: String(format: "%.0f%% lower recovery", (1 - engine.recoveryScore / 100) * 15),
-                effectPositive: false
-            ))
+    private static let utc: TimeZone = TimeZone(identifier: "UTC") ?? .current
+
+    /// Pearson correlation; nil if too few points or zero variance.
+    private static func pearson(_ xs: [Double], _ ys: [Double]) -> Double? {
+        let n = Double(xs.count)
+        guard xs.count == ys.count, xs.count >= 5 else { return nil }
+        let mx = xs.reduce(0, +) / n
+        let my = ys.reduce(0, +) / n
+        var num = 0.0, dx = 0.0, dy = 0.0
+        for i in xs.indices {
+            let a = xs[i] - mx, b = ys[i] - my
+            num += a * b; dx += a * a; dy += b * b
+        }
+        guard dx > 0, dy > 0 else { return nil }
+        return num / (dx.squareRoot() * dy.squareRoot())
+    }
+
+    private static func tier(n: Int, r: Double) -> FoodPattern.ConfidenceTier {
+        let a = abs(r)
+        if n >= 30 && a >= 0.45 { return .high }
+        if n >= 14 && a >= 0.28 { return .medium }
+        return .low
+    }
+
+    private static func strength(_ r: Double) -> String {
+        switch abs(r) {
+        case 0.6...:    return "strong"
+        case 0.4..<0.6: return "clear"
+        case 0.25..<0.4: return "mild"
+        default:        return "weak"
+        }
+    }
+
+    static func compute(entries: [FoodEntry], metrics: [DailyMetric]) -> [FoodPattern] {
+        var out: [FoodPattern] = []
+
+        // ── Recovery predictors (real, from health_metrics) ──────────────
+        func paired(_ sel: (DailyMetric) -> Double?) -> ([Double], [Double]) {
+            var xs = [Double](), ys = [Double]()
+            for m in metrics {
+                if let x = sel(m), let r = m.recovery, r > 0 { xs.append(x); ys.append(r) }
+            }
+            return (xs, ys)
         }
 
-        // Brain food pattern
-        let highMind = entries.filter { ($0.mindScore ?? 0) >= 10 }
-        if highMind.count >= 5 {
-            result.append(FoodPattern(
-                title: "Brain-friendly days",
-                subtitle: "Days with high Brain-Score correlate with better HRV the next morning.",
-                confidenceTier: highMind.count > 15 ? .high : .medium,
-                confidenceValue: min(Double(highMind.count) / 25.0, 1.0),
-                effectDescription: "+\(Int(engine.currentRMSSD * 0.08)) ms HRV",
-                effectPositive: true
-            ))
+        let hrvPair = paired { $0.hrv }
+        if let r = pearson(hrvPair.0, hrvPair.1) {
+            out.append(FoodPattern(
+                title: "HRV drives your recovery",
+                subtitle: "Across \(hrvPair.0.count) days, higher morning HRV preceded higher recovery.",
+                confidenceTier: tier(n: hrvPair.0.count, r: r),
+                confidenceValue: min(abs(r), 1.0),
+                effectDescription: "\(strength(r)) link · r \(String(format: "%.2f", r))",
+                effectPositive: r > 0))
         }
 
-        // Low NOVA pattern
-        let lowNova = entries.filter { ($0.novaAvg ?? 4) <= 1.5 }
-        if lowNova.count >= 8 {
-            result.append(FoodPattern(
-                title: "Minimally processed diet",
-                subtitle: "Days with NOVA <= 1.5 consistently show better recovery scores.",
-                confidenceTier: lowNova.count > 18 ? .high : .medium,
-                confidenceValue: min(Double(lowNova.count) / 22.0, 1.0),
-                effectDescription: String(format: "+%.0f%% recovery", engine.recoveryScore * 0.12),
-                effectPositive: true
-            ))
+        let rhrPair = paired { $0.restingHr }
+        if let r = pearson(rhrPair.0, rhrPair.1) {
+            out.append(FoodPattern(
+                title: "Resting HR vs recovery",
+                subtitle: "Lower resting heart rate nights tend to precede stronger recovery.",
+                confidenceTier: tier(n: rhrPair.0.count, r: r),
+                confidenceValue: min(abs(r), 1.0),
+                effectDescription: "\(strength(r))\(r < 0 ? " inverse" : "") link · r \(String(format: "%.2f", r))",
+                effectPositive: r < 0))
         }
 
-        // Calorie spike pattern
-        let highKcal = entries.filter { ($0.totalKcal ?? 0) > 2800 }
-        if highKcal.count >= 4 {
-            result.append(FoodPattern(
-                title: "High calorie volume",
-                subtitle: "Evening meals > 2800 kcal correlated with disturbed sleep.",
-                confidenceTier: .low,
-                confidenceValue: min(Double(highKcal.count) / 15.0, 1.0),
-                effectDescription: "-\(Int(engine.sleepScore * 0.08))% sleep score",
-                effectPositive: false
-            ))
+        let slpPair = paired { $0.sleepHours }
+        if slpPair.0.count >= 8, let r = pearson(slpPair.0, slpPair.1) {
+            out.append(FoodPattern(
+                title: "Sleep duration → recovery",
+                subtitle: "Recovery measured against sleep length over \(slpPair.0.count) nights.",
+                confidenceTier: tier(n: slpPair.0.count, r: r),
+                confidenceValue: min(abs(r), 1.0),
+                effectDescription: "\(strength(r)) link · r \(String(format: "%.2f", r))",
+                effectPositive: r > 0))
         }
 
-        return result.sorted { $0.confidenceValue > $1.confidenceValue }
+        // ── Food-dependent (real once logging accumulates) ───────────────
+        let fmt = DateFormatter()
+        fmt.dateFormat = "yyyy-MM-dd"
+        fmt.timeZone = utc
+        let cal = Calendar.current
+
+        var foodByDay: [String: [FoodEntry]] = [:]
+        for e in entries { foodByDay[fmt.string(from: e.capturedAt), default: []].append(e) }
+        var metByDay: [String: DailyMetric] = [:]
+        for m in metrics { metByDay[m.date] = m }
+
+        // Alcohol → NEXT-day recovery
+        var alcRecov = [Double](), soberRecov = [Double]()
+        for (day, es) in foodByDay {
+            guard let d = fmt.date(from: day),
+                  let next = cal.date(byAdding: .day, value: 1, to: d) else { continue }
+            guard let r = metByDay[fmt.string(from: next)]?.recovery, r > 0 else { continue }
+            if es.contains(where: { $0.items.contains { $0.isAlcohol == true } }) {
+                alcRecov.append(r)
+            } else {
+                soberRecov.append(r)
+            }
+        }
+        if alcRecov.count >= 3 && soberRecov.count >= 3 {
+            let a = alcRecov.reduce(0, +) / Double(alcRecov.count)
+            let s = soberRecov.reduce(0, +) / Double(soberRecov.count)
+            let pct = s > 0 ? ((a - s) / s) * 100 : 0
+            out.append(FoodPattern(
+                title: "Alcohol → next-day recovery",
+                subtitle: "Morning-after recovery vs sober nights, over \(alcRecov.count) drinking days.",
+                confidenceTier: alcRecov.count >= 8 ? .high : .medium,
+                confidenceValue: min(Double(alcRecov.count) / 12.0, 1.0),
+                effectDescription: String(format: "%+.0f%% recovery the morning after", pct),
+                effectPositive: (a - s) >= 0))
+        }
+
+        // High-NOVA day → that night's sleep score
+        var novaSleep = [Double](), cleanSleep = [Double]()
+        for (day, es) in foodByDay {
+            guard let ss = metByDay[day]?.sleepScore, ss > 0 else { continue }
+            let avgNova = es.compactMap { $0.novaAvg }.reduce(0, +) / Double(max(es.count, 1))
+            if avgNova >= 3.0 { novaSleep.append(ss) } else { cleanSleep.append(ss) }
+        }
+        if novaSleep.count >= 4 && cleanSleep.count >= 4 {
+            let hi = novaSleep.reduce(0, +) / Double(novaSleep.count)
+            let lo = cleanSleep.reduce(0, +) / Double(cleanSleep.count)
+            out.append(FoodPattern(
+                title: "Processed food → sleep",
+                subtitle: "Sleep score on heavy ultra-processed days vs cleaner days, \(novaSleep.count) days each.",
+                confidenceTier: novaSleep.count >= 10 ? .high : .medium,
+                confidenceValue: min(Double(novaSleep.count) / 14.0, 1.0),
+                effectDescription: String(format: "%+.0f sleep score on processed days", hi - lo),
+                effectPositive: (hi - lo) >= 0))
+        }
+
+        return out.sorted { $0.confidenceValue > $1.confidenceValue }
     }
 }

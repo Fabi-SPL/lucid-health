@@ -69,7 +69,18 @@ struct InsightCard: View {
     }
 }
 
-// MARK: - Model
+// MARK: - Models
+
+/// One day of health_metrics, dated so food (by day) can be joined to it.
+struct DailyMetric {
+    let date: String          // "yyyy-MM-dd" (UTC metric_date)
+    let recovery: Double?
+    let sleepScore: Double?
+    let sleepHours: Double?
+    let hrv: Double?
+    let restingHr: Double?
+    let alcoholImpact: Double?
+}
 
 struct FoodPattern: Identifiable {
     let id: UUID
