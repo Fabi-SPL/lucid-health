@@ -117,54 +117,44 @@ struct ReviewView: View {
 
     @ViewBuilder
     private var actionButton: some View {
-        if !hasAnalyzed {
-            Button { Task { await analyze() } } label: {
+        // Save is ALWAYS available — never gate logging behind Gemini.
+        // (Was: Save only appeared after hasAnalyzed==true, so a Gemini 429
+        // permanently trapped the user with no way to log the meal.)
+        // Gemini analysis is now an OPTIONAL enrichment, not a prerequisite.
+        VStack(spacing: DS.Spacing.sm) {
+            Button { saveEntry() } label: {
                 HStack {
-                    if isAnalyzing {
+                    if isSaving {
                         ProgressView().tint(.white)
                     } else {
-                        Image(systemName: "sparkles")
-                        Text("Analyze with Gemini")
+                        Image(systemName: "checkmark")
+                        Text(hasAnalyzed ? "Save meal" : "Save meal")
                     }
                 }
                 .frame(maxWidth: .infinity)
             }
             .buttonStyle(GlassActionButtonStyle(tint: DS.Colors.violet, filled: true))
-            .disabled(isAnalyzing)
-            .padding(.horizontal, DS.Spacing.md)
-        } else {
-            VStack(spacing: DS.Spacing.sm) {
-                Button { saveEntry() } label: {
-                    HStack {
-                        if isSaving {
-                            ProgressView().tint(.white)
-                        } else {
-                            Image(systemName: "checkmark")
-                            Text("Save meal")
-                        }
-                    }
-                    .frame(maxWidth: .infinity)
-                }
-                .buttonStyle(GlassActionButtonStyle(tint: DS.Colors.violet, filled: true))
-                .disabled(isSaving)
+            .disabled(isSaving)
 
-                Button {
-                    hasAnalyzed = false
-                    items = []
-                    geminiResult = nil
-                    Task { await analyze() }
-                } label: {
-                    HStack {
-                        Image(systemName: "arrow.clockwise")
-                        Text("Re-analyze with new context")
+            // Optional enrichment — analyze (or re-analyze) with Gemini.
+            Button {
+                if hasAnalyzed { hasAnalyzed = false; items = []; geminiResult = nil }
+                Task { await analyze() }
+            } label: {
+                HStack {
+                    if isAnalyzing {
+                        ProgressView().tint(DS.Colors.violet)
+                    } else {
+                        Image(systemName: hasAnalyzed ? "arrow.clockwise" : "sparkles")
+                        Text(hasAnalyzed ? "Re-analyze with new context" : "Analyze with Gemini (optional)")
                     }
-                    .frame(maxWidth: .infinity)
                 }
-                .buttonStyle(GlassActionButtonStyle(tint: DS.Colors.textSecondary, filled: false))
-                .disabled(isSaving)
+                .frame(maxWidth: .infinity)
             }
-            .padding(.horizontal, DS.Spacing.md)
+            .buttonStyle(GlassActionButtonStyle(tint: DS.Colors.textSecondary, filled: false))
+            .disabled(isSaving || isAnalyzing)
         }
+        .padding(.horizontal, DS.Spacing.md)
     }
 
     private func analyze() async {
@@ -193,8 +183,11 @@ struct ReviewView: View {
                 let filename = "\(UUID().uuidString).jpg"
                 let jpeg = image.jpegData(compressionQuality: 0.85) ?? Data()
 
-                step = "uploading photo to Supabase Storage"
-                let photoUrl = try await supabase.uploadFoodPhoto(jpeg, filename: filename)
+                // Photo is OPTIONAL — never let a Storage 403 nuke the whole log.
+                // try? swallows upload failure; the food row still inserts with
+                // photoUrl = nil. (Was: try await → threw → meal never saved.)
+                step = "uploading photo (optional)"
+                let photoUrl = try? await supabase.uploadFoodPhoto(jpeg, filename: filename)
 
                 let result = geminiResult
                 let entry = FoodEntry(
