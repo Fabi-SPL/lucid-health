@@ -1008,6 +1008,55 @@ class SupabaseClient {
         }
     }
 
+    /// Fetch per-day health_metrics for the Insights correlation engine.
+    /// Returns dated rows so food (by day) can be joined to recovery/sleep/HRV.
+    func fetchDailyMetrics(days: Int = 120) async -> [DailyMetric] {
+        do {
+            try await ensureAuth()
+            guard let token = accessToken else { return [] }
+
+            let fields = "metric_date,recovery_score,sleep_score,sleep_hours,hrv_avg,resting_hr,alcohol_impact"
+            let url = URL(string: "\(baseURL)/rest/v1/health_metrics?user_id=eq.\(userId)&select=\(fields)&order=metric_date.desc&limit=\(days)")!
+            var request = URLRequest(url: url)
+            request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+            request.setValue(anonKey, forHTTPHeaderField: "apikey")
+            request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+
+            let (data, response) = try await session.data(for: request)
+            let statusCode = (response as? HTTPURLResponse)?.statusCode ?? 0
+            guard statusCode == 200,
+                  let rows = try JSONSerialization.jsonObject(with: data) as? [[String: Any]] else {
+                log("Daily metrics fetch failed: HTTP \(statusCode)")
+                return []
+            }
+
+            func num(_ row: [String: Any], _ k: String) -> Double? {
+                if let v = row[k] as? Double { return v }
+                if let v = row[k] as? Int { return Double(v) }
+                if let v = row[k] as? NSNumber { return v.doubleValue }
+                return nil
+            }
+
+            let result: [DailyMetric] = rows.compactMap { row in
+                guard let date = row["metric_date"] as? String else { return nil }
+                return DailyMetric(
+                    date: date,
+                    recovery: num(row, "recovery_score"),
+                    sleepScore: num(row, "sleep_score"),
+                    sleepHours: num(row, "sleep_hours"),
+                    hrv: num(row, "hrv_avg"),
+                    restingHr: num(row, "resting_hr"),
+                    alcoholImpact: num(row, "alcohol_impact")
+                )
+            }
+            log("Daily metrics: \(result.count) days fetched")
+            return result
+        } catch {
+            log("Daily metrics fetch error: \(error.localizedDescription)")
+            return []
+        }
+    }
+
     // MARK: - Debug Log (push to Supabase for remote debugging)
 
     /// Push structured debug event (for sleep staging, smart alarm etc.)
