@@ -2809,6 +2809,14 @@ extension BLEManager: CBPeripheralDelegate {
     // MARK: - Double Tap Handler
 
     private func handleDoubleTap() {
+        // v115 — ignore double-tap events that arrive during a history backfill.
+        // The strap replays its buffered event log (including OLD double-taps) while
+        // dumping history; those replayed taps must not pop the live "What happened?"
+        // sheet or fire a notification. Only genuine live taps count.
+        guard !isDownloadingHistory else {
+            log("Double tap ignored — history sync in progress (replayed event)")
+            return
+        }
         let now = Date()
         // Debounce: 8 seconds between valid taps (reduces false positives from jumps/clapping)
         guard now.timeIntervalSince(doubleTapDebounce) > 8.0 else {
