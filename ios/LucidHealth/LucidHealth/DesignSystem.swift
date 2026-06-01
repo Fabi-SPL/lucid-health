@@ -251,21 +251,30 @@ enum DS {
     }
 
     // MARK: - Animations
+    // Smoothness pass (2026-06-01): higher damping = no overshoot wobble on UI
+    // transitions (Emil rule: ease-out, no bounce for functional motion). Every
+    // card-appear / stagger / state change across all 14 screens flows through
+    // these, so tuning here smooths the whole app at once.
     enum Anim {
-        static let standard = Animation.spring(duration: 0.3)
-        static let bouncy = Animation.bouncy
-        static let quick = Animation.easeOut(duration: 0.2)
-        static let ringFill = Animation.spring(response: 0.8, dampingFraction: 0.75)
-        static let countUp = Animation.spring(response: 0.9, dampingFraction: 0.8)
-        static let cardAppear = Animation.spring(response: 0.5, dampingFraction: 0.75)
+        static let standard = Animation.spring(response: 0.34, dampingFraction: 0.86)
+        static let bouncy = Animation.spring(response: 0.4, dampingFraction: 0.7)
+        /// Snappy ease-out for taps / toggles — instant-feeling feedback.
+        static let quick = Animation.timingCurve(0.22, 1, 0.36, 1, duration: 0.24)
+        /// Smooth ease-out-quint for content swaps (numbers, text, opacity).
+        static let smooth = Animation.timingCurve(0.22, 1, 0.36, 1, duration: 0.5)
+        static let ringFill = Animation.spring(response: 0.85, dampingFraction: 0.82)
+        static let countUp = Animation.spring(response: 0.9, dampingFraction: 0.85)
+        /// Card entrance — smooth settle, no visible bounce.
+        static let cardAppear = Animation.spring(response: 0.46, dampingFraction: 0.85)
         /// Gentle 4s breathing loop for live-data anchors (recovery ring steady-state)
         static let breath = Animation.easeInOut(duration: 4.0).repeatForever(autoreverses: true)
         /// Hero ring fill entrance — slower spring, more drama
-        static let ringEntrance = Animation.spring(response: 1.2, dampingFraction: 0.75)
+        static let ringEntrance = Animation.spring(response: 1.2, dampingFraction: 0.8)
 
-        /// Staggered delay for list items
+        /// Staggered delay for list items. Capped at 8 so long lists don't drag
+        /// the last cards in noticeably late (was a jank tell on Settings/Health).
         static func stagger(index: Int) -> Animation {
-            cardAppear.delay(Double(index) * 0.08)
+            cardAppear.delay(Double(min(index, 8)) * 0.05)
         }
     }
 
@@ -994,4 +1003,23 @@ struct GlassActionButtonStyle: ButtonStyle {
             .scaleEffect(configuration.isPressed ? 0.98 : 1)
             .animation(.easeOut(duration: 0.16), value: configuration.isPressed)
     }
+}
+
+// MARK: - Pressable Card Style
+
+/// Press feedback for whole-card buttons (tiles, list rows) that currently use
+/// `.buttonStyle(.plain)` and feel dead on tap. Subtle scale + opacity dip —
+/// makes every tappable surface feel physically responsive (Emil rule).
+struct PressableCardStyle: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .scaleEffect(configuration.isPressed ? 0.975 : 1)
+            .opacity(configuration.isPressed ? 0.92 : 1)
+            .animation(.easeOut(duration: 0.16), value: configuration.isPressed)
+    }
+}
+
+extension View {
+    /// Apply tactile press feedback to a card-shaped Button.
+    func pressableCard() -> some View { buttonStyle(PressableCardStyle()) }
 }
