@@ -196,7 +196,7 @@ jobs:
             "screenshotURLs": [],
             "version": "1.0.${RUN_NUMBER}",
             "buildVersion": "${RUN_NUMBER}",
-            "date": "${BUILD_DATE_ISO}",
+            "versionDate": "${BUILD_DATE_ISO}",
             "downloadURL": "${DOWNLOAD_URL}",
             "size": ${IPA_SIZE},
             "minOSVersion": "26.0",
