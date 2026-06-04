@@ -625,7 +625,20 @@ class BLEManager: NSObject, ObservableObject {
 
     // MARK: - Silent Audio Keep-Alive
 
+    // Battery: when disabled, rely on CoreBluetooth State Restoration alone — already wired
+    // (CBCentralManagerOptionRestoreIdentifierKey at init + willRestoreState + aggressive
+    // reconnect-on-disconnect). Default ON (no behavior change). Set UserDefaults
+    // "lucid_audio_keepalive_disabled" = true to validate burst-sync battery savings over one
+    // night before fully removing the keep-alive. Restoration is the backstop either way.
+    static var audioKeepAliveEnabled: Bool {
+        !UserDefaults.standard.bool(forKey: "lucid_audio_keepalive_disabled")
+    }
+
     func startSilentAudio() {
+        guard Self.audioKeepAliveEnabled else {
+            log("Silent audio keep-alive disabled by setting — relying on CoreBluetooth state restoration")
+            return
+        }
         guard !silentAudioActive else { return }
 
         // Listen for audio interruptions (phone calls, Spotify, etc.)
