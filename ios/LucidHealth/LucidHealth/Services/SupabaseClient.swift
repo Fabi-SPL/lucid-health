@@ -1261,6 +1261,14 @@ class SupabaseClient {
     // Captures the undecoded data0 + data1 fields from every Nth HR packet so we
     // can offline-diff them against known states and find SpO2 / respiration /
     // additional signals buried in the payload.
+    // Battery: raw reverse-engineering capture (whoop_realtime_raw + whoop_packet_debug)
+    // is DEV-ONLY and OFF by default. It was POSTing ~85-120k rows/day (~1 write/sec) and
+    // was the single largest avoidable background drain. Re-enable for a focused Whoop-RE
+    // session by setting UserDefaults "lucid_capture_raw_debug" = true.
+    static var captureRawDebugStreams: Bool {
+        UserDefaults.standard.bool(forKey: "lucid_capture_raw_debug")
+    }
+
     func pushRealtimeRaw(hr: Int,
                          rrIntervals: [Int],
                          data0Hex: String,
@@ -1273,6 +1281,7 @@ class SupabaseClient {
                          timestampUnix: Int64? = nil,
                          timestampFrac: Int64? = nil,
                          parsedFloats: [Float]? = nil) {
+        guard Self.captureRawDebugStreams else { return }
         Task {
             do {
                 try await ensureAuth()
@@ -1330,6 +1339,7 @@ class SupabaseClient {
                          packetLength: Int,
                          dataHex: String,
                          note: String? = nil) {
+        guard Self.captureRawDebugStreams else { return }
         Task {
             do {
                 try await ensureAuth()
