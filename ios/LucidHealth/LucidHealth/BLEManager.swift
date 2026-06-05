@@ -5,6 +5,7 @@ import Combine
 import UserNotifications
 import ActivityKit
 import WidgetKit
+import UIKit
 
 enum ConnectionState: String {
     case disconnected = "Disconnected"
@@ -20,6 +21,12 @@ class BLEManager: NSObject, ObservableObject {
     // MARK: - Published State
     @Published var connectionState: ConnectionState = .disconnected
     @Published var heartRate: Int = 0
+
+    // Tonight's smart-alarm plan (Module 7 sync). Drives the alcohol UI + card.
+    @Published var tonightPlanMode: String = "normal"
+    @Published var tonightPlanNote: String = ""
+    @Published var tonightWindowStart: Int = 0
+    @Published var tonightWindowEnd: Int = 0
     @Published var battery: Double = 0
     @Published var deviceClock: Date?
     @Published var isWorn: Bool = false
@@ -3514,13 +3521,19 @@ extension BLEManager: CBPeripheralDelegate {
     /// If the smart alarm fires earlier (detected light sleep + strap buzz), this gets cancelled.
     /// If the phone dies or BLE disconnects, iOS still delivers the notification.
     func scheduleFallbackAlarm() {
-        let alarmEnabled = UserDefaults.standard.bool(forKey: "lucid_alarm_enabled")
+        let d = UserDefaults.standard
+        let alcohol = d.bool(forKey: "lucid_alcohol_active")
+        let alarmEnabled = alcohol || d.bool(forKey: "lucid_alarm_enabled")
         guard alarmEnabled else {
             cancelFallbackAlarm()
             return
         }
 
-        let endMinutes = UserDefaults.standard.integer(forKey: "lucid_alarm_end")
+        // Alcohol night: backstop at the humane noon time, never the user's
+        // normal (earlier) end — that early force-wake is the bug we're fixing.
+        let endMinutes = alcohol
+            ? (d.integer(forKey: "lucid_alcohol_end") > 0 ? d.integer(forKey: "lucid_alcohol_end") : 12 * 60)
+            : d.integer(forKey: "lucid_alarm_end")
         guard endMinutes > 0 else { return }
 
         let endHour = endMinutes / 60
@@ -3553,8 +3566,10 @@ extension BLEManager: CBPeripheralDelegate {
             from: baseDate
         )
         let content = UNMutableNotificationContent()
-        content.title = "\u{23F0} Wake Up"
-        content.body = "Smart alarm fallback. Time to get up!"
+        content.title = alcohol ? "\u{1F305} Morning — no rush" : "\u{23F0} Wake Up"
+        content.body = alcohol
+            ? "Recovery backstop. You slept in to clear last night — get up when you're ready."
+            : "Smart alarm fallback. Time to get up!"
         content.sound = UNNotificationSound.defaultCritical
         content.interruptionLevel = .timeSensitive
         content.threadIdentifier = fallbackAlarmId
@@ -3580,6 +3595,101 @@ extension BLEManager: CBPeripheralDelegate {
         let ids = (0..<15).map { "\(fallbackAlarmId)_\($0)" }
         center.removePendingNotificationRequests(withIdentifiers: ids + [fallbackAlarmId])
         log("Fallback alarm cancelled")
+    }
+
+    // MARK: - Tonight Plan Sync (Smart Alarm Module 7)
+
+    /// Pull tonight's plan from the server and apply it. Safe to call on app
+    /// foreground, on the wind-down transition, and after toggling drinking.
+    func syncTonightPlan() async {
+        guard let plan = await supabase.fetchTonightPlan() else { return }
+        applyTonightPlan(plan)
+    }
+
+    /// Write the plan into local alarm state. Alcohol nights set the override
+    /// keys read by HealthEngine.alarmWindow* + scheduleFallbackAlarm; otherwise
+    /// the override is cleared and the user's own window is used.
+    func applyTonightPlan(_ plan: TonightPlan) {
+        let d = UserDefaults.standard
+        if plan.isAlcohol {
+            d.set(true, forKey: "lucid_alcohol_active")
+            d.set(plan.windowStartMinutes > 0 ? plan.windowStartMinutes : 9 * 60, forKey: "lucid_alcohol_start")
+            d.set(plan.windowEndMinutes > 0 ? plan.windowEndMinutes : 12 * 60, forKey: "lucid_alcohol_end")
+        } else {
+            d.set(false, forKey: "lucid_alcohol_active")
+        }
+        DispatchQueue.main.async {
+            self.tonightPlanMode = plan.mode
+            self.tonightPlanNote = plan.note
+            self.tonightWindowStart = plan.windowStartMinutes
+            self.tonightWindowEnd = plan.windowEndMinutes
+        }
+        scheduleFallbackAlarm()
+        log("Applied tonight plan: mode=\(plan.mode) window=\(plan.windowStartMinutes)-\(plan.windowEndMinutes)")
+    }
+
+    /// Wind-down nudge with a rendered image attachment (first use of
+    /// UNNotificationAttachment in the app). Fired when wind-down mode opens.
+    func sendWindDownNotification(note: String) {
+        let content = UNMutableNotificationContent()
+        content.title = "\u{1F319} Time to wind down"
+        content.body = note.isEmpty ? "Slow the body down. Lights low, screens away." : note
+        content.sound = .default
+        content.interruptionLevel = .active
+        content.threadIdentifier = "lucid_winddown"
+        if let imgURL = makeNotificationImage(
+            title: "Wind down",
+            subtitle: "Slow the body down",
+            accent: UIColor(red: 0.545, green: 0.486, blue: 0.965, alpha: 1)  // violet
+        ), let att = try? UNNotificationAttachment(identifier: "winddown_img", url: imgURL) {
+            content.attachments = [att]
+        }
+        let req = UNNotificationRequest(
+            identifier: "lucid_winddown_\(UUID().uuidString)",
+            content: content,
+            trigger: nil
+        )
+        UNUserNotificationCenter.current().add(req)
+        log("Wind-down notification sent")
+    }
+
+    /// Render a simple gradient card PNG to a temp file for a rich notification.
+    /// iOS copies the file into its attachment store, so temp is fine.
+    private func makeNotificationImage(title: String, subtitle: String, accent: UIColor) -> URL? {
+        let size = CGSize(width: 1000, height: 500)
+        let renderer = UIGraphicsImageRenderer(size: size)
+        let img = renderer.image { ctx in
+            let cg = ctx.cgContext
+            let colors = [
+                UIColor(red: 0.03, green: 0.03, blue: 0.06, alpha: 1).cgColor,
+                accent.withAlphaComponent(0.40).cgColor
+            ] as CFArray
+            if let grad = CGGradient(colorsSpace: CGColorSpaceCreateDeviceRGB(),
+                                     colors: colors, locations: [0, 1]) {
+                cg.drawLinearGradient(grad, start: .zero,
+                                      end: CGPoint(x: size.width, y: size.height), options: [])
+            }
+            let para = NSMutableParagraphStyle()
+            para.alignment = .left
+            let titleAttr: [NSAttributedString.Key: Any] = [
+                .font: UIFont.systemFont(ofSize: 76, weight: .bold),
+                .foregroundColor: UIColor.white,
+                .paragraphStyle: para
+            ]
+            (title as NSString).draw(in: CGRect(x: 64, y: 150, width: 872, height: 110),
+                                     withAttributes: titleAttr)
+            let subAttr: [NSAttributedString.Key: Any] = [
+                .font: UIFont.systemFont(ofSize: 40, weight: .medium),
+                .foregroundColor: UIColor.white.withAlphaComponent(0.82),
+                .paragraphStyle: para
+            ]
+            (subtitle as NSString).draw(in: CGRect(x: 64, y: 280, width: 872, height: 150),
+                                        withAttributes: subAttr)
+        }
+        guard let data = img.pngData() else { return nil }
+        let url = FileManager.default.temporaryDirectory
+            .appendingPathComponent("lucid_notif_\(UUID().uuidString).png")
+        do { try data.write(to: url); return url } catch { return nil }
     }
 
     /// Push notification at 20% battery so Fabi can charge before bed (prevents overnight data gaps)

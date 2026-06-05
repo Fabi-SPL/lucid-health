@@ -167,14 +167,32 @@ class HealthEngine: ObservableObject {
     var sustainedMovementMinutes: Double = 0
     var lastSleepCheckTime: Date?
     var wakeUpLockUntil: Date?
+    /// Alcohol-recovery night (Smart Alarm Module 7). Set by the tonight-plan
+    /// sync. When active, the wake window is overridden to a humane late window
+    /// (server plan, default 09:00–12:00) and the gate is more conservative so
+    /// the back-half deep-sleep rebound is never cut short.
+    var alcoholActive: Bool {
+        UserDefaults.standard.bool(forKey: "lucid_alcohol_active")
+    }
     var alarmEnabled: Bool {
-        UserDefaults.standard.bool(forKey: "lucid_alarm_enabled")
+        // Alcohol mode keeps a humane noon backstop armed even if the user's
+        // own alarm is off — it just never force-wakes early.
+        if alcoholActive { return true }
+        return UserDefaults.standard.bool(forKey: "lucid_alarm_enabled")
     }
     var alarmWindowStart: Int {
-        UserDefaults.standard.integer(forKey: "lucid_alarm_start")
+        if alcoholActive {
+            let s = UserDefaults.standard.integer(forKey: "lucid_alcohol_start")
+            return s > 0 ? s : 9 * 60       // 09:00 — no earlier
+        }
+        return UserDefaults.standard.integer(forKey: "lucid_alarm_start")
     }
     var alarmWindowEnd: Int {
-        UserDefaults.standard.integer(forKey: "lucid_alarm_end")
+        if alcoholActive {
+            let e = UserDefaults.standard.integer(forKey: "lucid_alcohol_end")
+            return e > 0 ? e : 12 * 60      // 12:00 backstop
+        }
+        return UserDefaults.standard.integer(forKey: "lucid_alarm_end")
     }
     var alarmFiredToday = false
     /// Date the alarm last fired. Used to auto-reset alarmFiredToday across days

@@ -90,6 +90,7 @@
 		LH000070 /* ExperimentalFeaturesService.swift in Sources */ = {isa = PBXBuildFile; fileRef = LH100070; };
 		LH000071 /* ExperimentalCards.swift in Sources */ = {isa = PBXBuildFile; fileRef = LH100071; };
 		LH000072 /* CoherenceDrillView.swift in Sources */ = {isa = PBXBuildFile; fileRef = LH100072; };
+		LH000201 /* WindDownView.swift in Sources */ = {isa = PBXBuildFile; fileRef = LH100201; };
 		LH000073 /* ContextTiles.swift in Sources */ = {isa = PBXBuildFile; fileRef = LH100073; };
 		LH000076 /* DailyInsightsStrip.swift in Sources */ = {isa = PBXBuildFile; fileRef = LH100076; };
 		LH000077 /* ManualFoodEntrySheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = LH100077; };
@@ -215,6 +216,7 @@
 		LH100070 /* ExperimentalFeaturesService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Services/ExperimentalFeaturesService.swift; sourceTree = "<group>"; };
 		LH100071 /* ExperimentalCards.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ExperimentalCards.swift; sourceTree = "<group>"; };
 		LH100072 /* CoherenceDrillView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CoherenceDrillView.swift; sourceTree = "<group>"; };
+		LH100201 /* WindDownView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WindDownView.swift; sourceTree = "<group>"; };
 		LH100073 /* ContextTiles.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContextTiles.swift; sourceTree = "<group>"; };
 		LH100076 /* DailyInsightsStrip.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DailyInsightsStrip.swift; sourceTree = "<group>"; };
 		LH100077 /* ManualFoodEntrySheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ManualFoodEntrySheet.swift; sourceTree = "<group>"; };
@@ -319,6 +321,7 @@
 				LH10006E /* EditFoodEntrySheet.swift */,
 				LH100071 /* ExperimentalCards.swift */,
 				LH100072 /* CoherenceDrillView.swift */,
+				LH100201 /* WindDownView.swift */,
 				LH100073 /* ContextTiles.swift */,
 				LH100076 /* DailyInsightsStrip.swift */,
 				LH100075 /* LogViewerView.swift */,
@@ -566,6 +569,7 @@
 				LH000070 /* ExperimentalFeaturesService.swift in Sources */,
 				LH000071 /* ExperimentalCards.swift in Sources */,
 				LH000072 /* CoherenceDrillView.swift in Sources */,
+				LH000201 /* WindDownView.swift in Sources */,
 				LH000073 /* ContextTiles.swift in Sources */,
 				LH000076 /* DailyInsightsStrip.swift in Sources */,
 				LH000077 /* ManualFoodEntrySheet.swift in Sources */,
