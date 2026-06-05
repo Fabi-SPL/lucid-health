@@ -372,7 +372,7 @@ extension HealthEngine {
         let slopeOK = isRmssdTrendingUp
         let targetIsEarly = alarmWindowStart > 0 && alarmWindowStart < 6 * 60
         let targetIsLate = alarmWindowStart >= 7 * 60 + 30
-        let canTrigger: Bool
+        var canTrigger: Bool
         if targetIsEarly {
             canTrigger = stageOK
         } else if targetIsLate {
