@@ -33,6 +33,7 @@ struct TodayView: View {
     @StateObject private var modeStore = AppModeStore()
     @State private var showTimeline = false
     @State private var activityDraft: String = ""
+    @State private var showWindDown = false
 
     // Shared glass sampling namespace — lets GlassEffectContainer treat
     // sibling glass surfaces as one continuous material per LiquidGlassReference.
@@ -44,6 +45,24 @@ struct TodayView: View {
 
     private var engine: HealthEngine { bleManager.healthEngine }
     private var overlay: RecoveryOverlay { RecoveryOverlayResolver.resolve(engine: engine) }
+
+    /// Show the wind-down takeover at most once per calendar day, when wind-down
+    /// mode is active. Also fires the wind-down image notification.
+    private func maybeShowWindDown(_ mode: AppMode) {
+        guard mode == .windDown else { return }
+        let key = "lucid_winddown_shown_date"
+        let today = Self.dayStamp(Date())
+        if UserDefaults.standard.string(forKey: key) == today { return }
+        UserDefaults.standard.set(today, forKey: key)
+        showWindDown = true
+        bleManager.sendWindDownNotification(note: bleManager.tonightPlanNote)
+    }
+
+    private static func dayStamp(_ date: Date) -> String {
+        let f = DateFormatter()
+        f.dateFormat = "yyyy-MM-dd"
+        return f.string(from: date)
+    }
 
     private var todayEntries: [FoodEntry] {
         entries.filter { Calendar.current.isDateInToday($0.capturedAt) }
@@ -166,6 +185,10 @@ struct TodayView: View {
         .sheet(isPresented: $bleManager.showDoubleTapSheet) {
             QuickTagSheet(ble: bleManager)
         }
+        // Wind-down takeover — comes up once per night when wind-down mode opens.
+        .fullScreenCover(isPresented: $showWindDown) {
+            WindDownView(bleManager: bleManager) { showWindDown = false }
+        }
         // ONE cover for all three food-entry modes. SwiftUI's multi-modifier
         // stacking is flaky (3rd cover on same view silently no-ops). Item-based
         // presentation with an enum is the canonical workaround.
@@ -185,8 +208,14 @@ struct TodayView: View {
             withAnimation(DS.Anim.cardAppear) { appeared = true }
             hasLoaded = true
             recoveryTrend = await bleManager.supabase.fetchRecoveryTrend()
+            await bleManager.syncTonightPlan()
+            maybeShowWindDown(modeStore.current)
         }
         .onDisappear { modeStore.stop() }
+        // Wind-down page comes up once per night when the mode flips to wind-down.
+        .onChange(of: modeStore.current) { _, newMode in
+            maybeShowWindDown(newMode)
+        }
         // Reload entries when app comes back to foreground — picks up server-side
         // inserts (e.g. meals logged via REST while app was backgrounded).
         .onChange(of: scenePhase) { _, newPhase in
@@ -206,6 +235,7 @@ struct TodayView: View {
                     let trend = await bleManager.supabase.fetchRecoveryTrend()
                     await MainActor.run { recoveryTrend = trend }
                 }
+                Task { await bleManager.syncTonightPlan() }
             }
         }
         .sensoryFeedback(.success, trigger: hasLoaded)
@@ -889,6 +919,7 @@ private struct SmartAlarmCard: View {
     @AppStorage("lucid_alarm_start") private var windowStartMinutes: Int = 7 * 60   // 07:00
     @AppStorage("lucid_alarm_end") private var windowEndMinutes: Int = 7 * 60 + 30  // 07:30
     @State private var testQueued: Bool = false
+    @State private var drinkingTonight: Bool = false
 
     private var windowLength: Int {
         max(15, windowEndMinutes - windowStartMinutes)
@@ -950,6 +981,51 @@ private struct SmartAlarmCard: View {
                             bleManager.cancelFallbackAlarm()
                         }
                     }
+            }
+
+            // 🍷 Drinking tonight — flips the whole alarm into alcohol-recovery
+            // mode (no early wake, humane noon backstop). Server-flagged + synced.
+            VStack(alignment: .leading, spacing: 8) {
+                HStack(spacing: 8) {
+                    Text("\u{1F377}").font(.system(size: 15))
+                    Text("Drinking tonight")
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundStyle(DS.Colors.textPrimary)
+                    Spacer()
+                    Toggle("", isOn: $drinkingTonight)
+                        .labelsHidden()
+                        .tint(DS.Colors.amber)
+                        .onChange(of: drinkingTonight) { _, isOn in
+                            let h = UIImpactFeedbackGenerator(style: .light)
+                            h.impactOccurred()
+                            Task {
+                                _ = await bleManager.supabase.setDrinkingTonight(isOn)
+                                await bleManager.syncTonightPlan()
+                            }
+                        }
+                }
+                if bleManager.tonightPlanMode == "alcohol" {
+                    Text(bleManager.tonightPlanNote.isEmpty
+                         ? "No early alarm tonight — you sleep until your body is done."
+                         : bleManager.tonightPlanNote)
+                        .font(.system(size: 11))
+                        .foregroundStyle(DS.Colors.textSecondary)
+                        .lineSpacing(2)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+            .padding(DS.Spacing.sm)
+            .background(
+                RoundedRectangle(cornerRadius: 14, style: .continuous)
+                    .fill(DS.Colors.amber.opacity(bleManager.tonightPlanMode == "alcohol" ? 0.10 : 0.04))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 14, style: .continuous)
+                            .stroke(DS.Colors.amber.opacity(0.25), lineWidth: 0.5)
+                    )
+            )
+            .onAppear { drinkingTonight = bleManager.tonightPlanMode == "alcohol" }
+            .onChange(of: bleManager.tonightPlanMode) { _, mode in
+                drinkingTonight = mode == "alcohol"
             }
 
             // Status line — green/violet/grey based on enabled + window

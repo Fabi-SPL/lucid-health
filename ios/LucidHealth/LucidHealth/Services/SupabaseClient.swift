@@ -4,6 +4,20 @@ import UIKit
 /// Combined health + food Supabase client for LucidHealth.
 /// Merges LucidBridge full client with LucidFoods food methods.
 /// No dependencies — just URLSession.
+
+/// Tonight's smart-alarm plan, decoded from the server `plan_tonight_auto` RPC.
+/// `mode` is "alcohol" (recovery override — no early wake) or "normal".
+/// Window minutes are local minutes-of-day (e.g. 540 = 09:00).
+struct TonightPlan {
+    let mode: String
+    let note: String
+    let windowStartMinutes: Int   // when smart-wake starts watching
+    let windowEndMinutes: Int     // hard backstop
+    let hrFloor: Double?          // alcohol nights: elevated sleeping-HR floor
+    let targetSleepH: Double?
+    var isAlcohol: Bool { mode == "alcohol" }
+}
+
 class SupabaseClient {
 
     // Singleton — shared by app + BLEManager + Foods views
@@ -411,6 +425,90 @@ class SupabaseClient {
             log("recompute_health_metrics error: \(error.localizedDescription)")
             return nil
         }
+    }
+
+    // MARK: - Alcohol Mode (Smart Alarm Module 7)
+
+    /// Pre-flag (or clear) "drinking tonight" for tomorrow's wake date. Server
+    /// also recomputes + stores tonight's plan immediately on this call.
+    func setDrinkingTonight(_ drinking: Bool) async -> Bool {
+        do {
+            try await ensureAuth()
+            guard let token = accessToken else { return false }
+            let body: [String: Any] = ["p_user_id": userId, "p_drinking": drinking]
+            let url = URL(string: "\(baseURL)/rest/v1/rpc/set_drinking_tonight")!
+            var req = URLRequest(url: url)
+            req.httpMethod = "POST"
+            req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+            req.setValue(anonKey, forHTTPHeaderField: "apikey")
+            req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+            req.httpBody = try JSONSerialization.data(withJSONObject: body)
+            let (_, resp) = try await session.data(for: req)
+            let code = (resp as? HTTPURLResponse)?.statusCode ?? 0
+            log("set_drinking_tonight(\(drinking)) HTTP \(code)")
+            return code < 300
+        } catch {
+            log("set_drinking_tonight error: \(error.localizedDescription)")
+            return false
+        }
+    }
+
+    /// Fetch tonight's plan (alcohol-aware). Returns nil on any failure so the
+    /// app safely falls back to the user's local alarm settings.
+    func fetchTonightPlan() async -> TonightPlan? {
+        do {
+            try await ensureAuth()
+            guard let token = accessToken else { return nil }
+            let body: [String: Any] = ["p_user_id": userId]
+            let url = URL(string: "\(baseURL)/rest/v1/rpc/plan_tonight_auto")!
+            var req = URLRequest(url: url)
+            req.httpMethod = "POST"
+            req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+            req.setValue(anonKey, forHTTPHeaderField: "apikey")
+            req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+            req.httpBody = try JSONSerialization.data(withJSONObject: body)
+            let (data, resp) = try await session.data(for: req)
+            let code = (resp as? HTTPURLResponse)?.statusCode ?? 0
+            guard code < 300 else { log("plan_tonight_auto HTTP \(code)"); return nil }
+
+            // RPC returns the jsonb object directly (some PostgREST versions wrap
+            // it in a single-element array) — handle both.
+            let obj: [String: Any]?
+            if let arr = try JSONSerialization.jsonObject(with: data) as? [[String: Any]] {
+                obj = arr.first
+            } else {
+                obj = try JSONSerialization.jsonObject(with: data) as? [String: Any]
+            }
+            guard let p = obj else { return nil }
+
+            let mode = (p["mode"] as? String) ?? "normal"
+            let note = (p["note"] as? String) ?? ""
+            let start = localMinutes(fromISO: p["wake_window_start"] as? String) ?? 0
+            // alcohol plan exposes hard_backstop; normal plan uses wake_window_end
+            let endISO = (p["hard_backstop"] as? String) ?? (p["wake_window_end"] as? String)
+            let end = localMinutes(fromISO: endISO) ?? 0
+            let floor = (p["hr_floor"] as? NSNumber)?.doubleValue
+            let tgt = (p["target_sleep_h"] as? NSNumber)?.doubleValue
+            log("plan_tonight_auto → mode=\(mode) window=\(start)-\(end)")
+            return TonightPlan(mode: mode, note: note,
+                               windowStartMinutes: start, windowEndMinutes: end,
+                               hrFloor: floor, targetSleepH: tgt)
+        } catch {
+            log("plan_tonight_auto error: \(error.localizedDescription)")
+            return nil
+        }
+    }
+
+    /// Parse an ISO8601 timestamptz string into local minutes-of-day.
+    private func localMinutes(fromISO iso: String?) -> Int? {
+        guard let iso = iso else { return nil }
+        let withFrac = ISO8601DateFormatter()
+        withFrac.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        let plain = ISO8601DateFormatter()
+        plain.formatOptions = [.withInternetDateTime]
+        guard let date = withFrac.date(from: iso) ?? plain.date(from: iso) else { return nil }
+        let c = Calendar.current.dateComponents([.hour, .minute], from: date)
+        return (c.hour ?? 0) * 60 + (c.minute ?? 0)
     }
 
     // MARK: - Wake-Up Notification

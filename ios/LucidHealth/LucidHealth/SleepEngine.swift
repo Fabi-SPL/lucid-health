@@ -327,7 +327,9 @@ extension HealthEngine {
         // Pre-alarm micro-ping — 20-25 min before window start, fire a single
         // gentle haptic to briefly arouse → re-enter N1/N2 → guarantees a
         // clean light-sleep detection window at wake time.
-        if alarmEnabled && !microPingFiredToday && alarmWindowStart > 0 {
+        // Alcohol nights skip the pre-wake micro-ping entirely — we do NOT want
+        // to arouse him early; the back-half rebound is the recovery he needs.
+        if alarmEnabled && !microPingFiredToday && alarmWindowStart > 0 && !alcoholActive {
             let microPingStart = alarmWindowStart - 25
             let microPingEnd = alarmWindowStart - 20
             if minuteOfDay >= microPingStart && minuteOfDay <= microPingEnd {
@@ -378,6 +380,10 @@ extension HealthEngine {
         } else {
             canTrigger = stageOK || (slopeOK && currentSleepStage != .deep)
         }
+        // Alcohol mode: require a genuine light/REM moment (slope alone is not
+        // enough) so the back-half deep rebound is protected. The end-of-window
+        // safety net at noon still guarantees a wake.
+        if alcoholActive { canTrigger = stageOK }
         if canTrigger {
             alarmFiredToday = true
             alarmLastFireDate = now
