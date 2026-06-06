@@ -329,11 +329,12 @@ extension HealthEngine {
         // clean light-sleep detection window at wake time.
         // Alcohol nights skip the pre-wake micro-ping entirely — we do NOT want
         // to arouse him early; the back-half rebound is the recovery he needs.
-        if alarmEnabled && !microPingFiredToday && alarmWindowStart > 0 && !alcoholActive {
+        if alarmEnabled && !microPingFiredToday && !microPingFiredPersistedToday && alarmWindowStart > 0 && !alcoholActive {
             let microPingStart = alarmWindowStart - 25
             let microPingEnd = alarmWindowStart - 20
             if minuteOfDay >= microPingStart && minuteOfDay <= microPingEnd {
                 microPingFiredToday = true
+                persistMicroPingFired()
                 microPingLastFireDate = now
                 preAlarmMicroPingCallback?()
                 print("[SmartAlarm] MICRO-PING fired at \(minuteOfDay / 60):\(String(format: "%02d", minuteOfDay % 60)) — seeding N1 transition")
@@ -356,8 +357,21 @@ extension HealthEngine {
             }
         }
 
-        guard alarmEnabled, !alarmFiredToday else { return }
+        guard alarmEnabled, !alarmFiredToday, !alarmFiredPersistedToday else { return }
         guard minuteOfDay >= alarmWindowStart && minuteOfDay <= alarmWindowEnd else { return }
+
+        // ROUND-ALARM GUARD: inside the wake window, if he's already up (HR-based —
+        // the stage classifier is unreliable on his low-HR mornings), retire
+        // today's alarm and cancel the pending noon fallback so it can't "good
+        // morning" him at 1pm after he's been awake for hours. (Gated to the
+        // window so it never retires tomorrow's alarm while he's up this evening.)
+        if isLikelyAwakeNow {
+            alarmFiredToday = true
+            persistAlarmFired()
+            cancelFallbackCallback?()
+            print("[SmartAlarm] Already awake in-window — suppressing alarm + cancelling fallback")
+            return
+        }
 
         // Trigger on light sleep OR REM (both are good wake moments).
         // Accept immediately if stage matches. Also accept if RMSSD is trending up
@@ -380,12 +394,14 @@ extension HealthEngine {
         } else {
             canTrigger = stageOK || (slopeOK && currentSleepStage != .deep)
         }
-        // Alcohol mode: require a genuine light/REM moment (slope alone is not
-        // enough) so the back-half deep rebound is protected. The end-of-window
-        // safety net at noon still guarantees a wake.
-        if alcoholActive { canTrigger = stageOK }
+        // Alcohol mode: NO proactive smart-wake at all. He's always classified
+        // "light", so any light-sleep trigger fires the instant the window opens
+        // (that was the 9am buzz). On a recovery night only the humane noon
+        // backstop below is allowed — "no early alarm" stays literally true.
+        if alcoholActive { canTrigger = false }
         if canTrigger {
             alarmFiredToday = true
+            persistAlarmFired()
             alarmLastFireDate = now
             DispatchQueue.main.async {
                 self.smartAlarmTriggered = true
@@ -401,9 +417,11 @@ extension HealthEngine {
             )
         }
 
-        // Safety net — end of window, force alarm regardless of stage
+        // Safety net — end of window. (Already-awake case returned above, so
+        // this only fires when he's genuinely still down by HR.)
         if minuteOfDay >= alarmWindowEnd - 1 {
             alarmFiredToday = true
+            persistAlarmFired()
             alarmLastFireDate = now
             DispatchQueue.main.async {
                 self.smartAlarmTriggered = true

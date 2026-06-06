@@ -371,19 +371,26 @@ class BLEManager: NSObject, ObservableObject {
         healthEngine.onSmartAlarmTrigger { [weak self] stage in
             guard let self = self else { return }
             self.log("SMART ALARM! Stage: \(stage.rawValue) — progressive ramp")
+            // Each ESCALATION pulse first checks he hasn't already woken from an
+            // earlier pulse — no point buzzing harder at someone who's up. Only
+            // the gentle opener fires unconditionally (that's the wake itself).
+            func escalateIfAsleep(_ pattern: UInt8) {
+                guard !self.healthEngine.isLikelyAwakeNow else { self.forceStopHaptics(); return }
+                self.sendHapticRaw(pattern)
+            }
             // Gentle opening pulse (pattern 0)
             self.sendHapticRaw(0)
             self.bleQueue.asyncAfter(deadline: .now() + 0.5) { self.forceStopHaptics() }
             // Mid pulse (pattern 1) at +20s — stronger, still soft
-            self.bleQueue.asyncAfter(deadline: .now() + 20.0) { self.sendHapticRaw(1) }
+            self.bleQueue.asyncAfter(deadline: .now() + 20.0) { escalateIfAsleep(1) }
             self.bleQueue.asyncAfter(deadline: .now() + 20.5) { self.forceStopHaptics() }
             // Stronger pulse (pattern 2) at +45s
-            self.bleQueue.asyncAfter(deadline: .now() + 45.0) { self.sendHapticRaw(2) }
+            self.bleQueue.asyncAfter(deadline: .now() + 45.0) { escalateIfAsleep(2) }
             self.bleQueue.asyncAfter(deadline: .now() + 45.5) { self.forceStopHaptics() }
             // Final double-buzz at +75s if still asleep — escalation peak
-            self.bleQueue.asyncAfter(deadline: .now() + 75.0) { self.sendHapticRaw(2) }
+            self.bleQueue.asyncAfter(deadline: .now() + 75.0) { escalateIfAsleep(2) }
             self.bleQueue.asyncAfter(deadline: .now() + 75.5) { self.forceStopHaptics() }
-            self.bleQueue.asyncAfter(deadline: .now() + 77.0) { self.sendHapticRaw(2) }
+            self.bleQueue.asyncAfter(deadline: .now() + 77.0) { escalateIfAsleep(2) }
             self.bleQueue.asyncAfter(deadline: .now() + 77.5) { self.forceStopHaptics() }
             // Backup stop — fires even if connection drops and reconnects
             self.bleQueue.asyncAfter(deadline: .now() + 80.0) { self.forceStopHaptics() }
@@ -393,6 +400,13 @@ class BLEManager: NSObject, ObservableObject {
 
             // Also send iOS notification so it shows on lock screen
             self.sendAlarmNotification(stage: stage)
+        }
+
+        // Round-alarm: SleepEngine calls this when it detects he's already awake,
+        // so the pending noon fallback notification gets cancelled instead of
+        // firing "good morning" at someone who's been up for hours.
+        healthEngine.cancelFallbackCallback = { [weak self] in
+            self?.cancelFallbackAlarm()
         }
 
         // Pre-alarm micro-ping callback — single gentle pulse 20-25 min before window.
@@ -2589,7 +2603,10 @@ extension BLEManager: CBPeripheralDelegate {
 
                 // 20% battery push notification — once per depletion cycle
                 // Gives Fabi time to charge before bed, preventing overnight data gaps
-                if level <= 20 && level > 0 && !self.batteryAlertSent {
+                // Don't ping while he's asleep — a battery warning he can't act
+                // on (can't charge while sleeping) but that wakes him is worse
+                // than the data gap. Flag stays unset so it fires once he's up.
+                if level <= 20 && level > 0 && !self.batteryAlertSent && !self.healthEngine.sleepDetected {
                     self.batteryAlertSent = true
                     self.sendLowBatteryNotification(level)
                 } else if level > 50 {
@@ -2597,16 +2614,11 @@ extension BLEManager: CBPeripheralDelegate {
                     self.lowBatteryBuzzSent = false  // Reset strap buzz flag too
                 }
 
-                // Low battery STRAP BUZZ — once per depletion cycle (was firing every
-                // battery reading = strap vibrating non-stop, infuriating). Guarded
-                // identically to batteryAlertSent. Reset when battery > 50%.
-                if level < 15 && level > 0 && !self.lowBatteryBuzzSent {
-                    self.lowBatteryBuzzSent = true
-                    self.log("LOW BATTERY \(String(format: "%.0f", level))% — buzzing alert (once)")
-                    self.sendHapticRaw(1)
-                    self.bleQueue.asyncAfter(deadline: .now() + 1.5) { self.sendHapticRaw(1) }
-                    self.bleQueue.asyncAfter(deadline: .now() + 3.0) { self.forceStopHaptics() }
-                }
+                // Low-battery STRAP buzz removed (Fabi 2026-06-06): a wrist
+                // vibration that can run long during BLE reconnect churn is more
+                // annoying than helpful. The single phone notification above is
+                // the alert — "two beeps, I look at my phone." The strap now only
+                // ever buzzes for the actual wake alarm.
             }
         } else if cmd == WhoopCommand.getClock.rawValue {
             if let date = WhoopProtocol.parseClock(packet.data) {
@@ -3707,6 +3719,16 @@ extension BLEManager: CBPeripheralDelegate {
         UNUserNotificationCenter.current().add(request)
     }
 
+    /// Time-aware wake title — "Good morning" is plain wrong at 1pm.
+    private func wakeTitle() -> String {
+        let h = Calendar.current.component(.hour, from: Date())
+        switch h {
+        case 0..<10:  return "\u{1F305} Good morning"
+        case 10..<14: return "\u{23F0} Time to get up"
+        default:      return "\u{23F0} Wake up"
+        }
+    }
+
     /// Send an immediate notification when smart alarm fires (shows on lock screen).
     /// v108: SINGLE notification (was 20 chained — Fabi feedback 2026-05-25). The
     /// strap haptic ramp at line 356 already provides progressive wrist vibration
@@ -3714,7 +3736,7 @@ extension BLEManager: CBPeripheralDelegate {
     /// screen. defaultCritical sound + .timeSensitive bypasses silent/DND.
     private func sendAlarmNotification(stage: HealthEngine.SleepStage) {
         scheduleAlarmBuzzChain(
-            title: "\u{1F305} Good Morning",
+            title: wakeTitle(),
             body: "Smart alarm: waking you from \(stage.rawValue) sleep",
             count: 1,
             spacingSec: 2,

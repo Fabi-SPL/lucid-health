@@ -212,6 +212,39 @@ class HealthEngine: ObservableObject {
     var sleepStageCallback: ((SleepStage) -> Void)?
     var preAlarmMicroPingCallback: (() -> Void)?
     var wakeUpCallback: (() -> Void)?
+    var cancelFallbackCallback: (() -> Void)?
+
+    // MARK: - Round-alarm guards (never wake someone already awake; survive relaunch)
+
+    /// Robust "is he awake right now?" — independent of the sleep-stage classifier,
+    /// which is unreliable on his chronic-low-HR mornings (sleeping HR ~58 rarely
+    /// crosses the classifier's wake threshold even when he's up and about).
+    var isLikelyAwakeNow: Bool {
+        if currentSleepStage == .awake { return true }
+        let recent = Array(recentHR.suffix(12))   // ~2 min at 10s cadence
+        guard recent.count >= 6 else { return false }
+        let avg = recent.reduce(0, +) / Double(recent.count)
+        return avg > baselineRHR + 18
+    }
+
+    private var alarmDayStamp: String {
+        let f = DateFormatter(); f.dateFormat = "yyyy-MM-dd"
+        return f.string(from: Date())
+    }
+    /// Alarm/micro-ping fire is persisted so BLE-reconnect relaunches can't reset
+    /// the in-memory flag and re-fire hours later (the 1pm re-fire bug).
+    var alarmFiredPersistedToday: Bool {
+        UserDefaults.standard.string(forKey: "lucid_alarm_fired_date") == alarmDayStamp
+    }
+    func persistAlarmFired() {
+        UserDefaults.standard.set(alarmDayStamp, forKey: "lucid_alarm_fired_date")
+    }
+    var microPingFiredPersistedToday: Bool {
+        UserDefaults.standard.string(forKey: "lucid_microping_fired_date") == alarmDayStamp
+    }
+    func persistMicroPingFired() {
+        UserDefaults.standard.set(alarmDayStamp, forKey: "lucid_microping_fired_date")
+    }
     var lastWakeUpNotification: Date?
     let wakeUpCooldownHours: Double = 12.0
     var sleepStartTime: Date?
