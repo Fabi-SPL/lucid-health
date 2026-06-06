@@ -919,7 +919,6 @@ private struct SmartAlarmCard: View {
     @AppStorage("lucid_alarm_start") private var windowStartMinutes: Int = 7 * 60   // 07:00
     @AppStorage("lucid_alarm_end") private var windowEndMinutes: Int = 7 * 60 + 30  // 07:30
     @State private var testQueued: Bool = false
-    @State private var drinkingTonight: Bool = false
 
     private var windowLength: Int {
         max(15, windowEndMinutes - windowStartMinutes)
@@ -992,10 +991,13 @@ private struct SmartAlarmCard: View {
                         .font(.system(size: 13, weight: .semibold))
                         .foregroundStyle(DS.Colors.textPrimary)
                     Spacer()
-                    Toggle("", isOn: $drinkingTonight)
-                        .labelsHidden()
-                        .tint(DS.Colors.amber)
-                        .onChange(of: drinkingTonight) { _, isOn in
+                    // Computed binding: getter reflects server truth; setter ONLY
+                    // fires on a real user tap. (A @State + onChange re-fired on the
+                    // programmatic onAppear/sync assignment, which re-flagged the
+                    // NEXT day on every launch — alcohol mode walked forward forever.)
+                    Toggle("", isOn: Binding(
+                        get: { bleManager.tonightPlanMode == "alcohol" },
+                        set: { isOn in
                             let h = UIImpactFeedbackGenerator(style: .light)
                             h.impactOccurred()
                             Task {
@@ -1003,6 +1005,9 @@ private struct SmartAlarmCard: View {
                                 await bleManager.syncTonightPlan()
                             }
                         }
+                    ))
+                    .labelsHidden()
+                    .tint(DS.Colors.amber)
                 }
                 if bleManager.tonightPlanMode == "alcohol" {
                     Text(bleManager.tonightPlanNote.isEmpty
@@ -1023,10 +1028,6 @@ private struct SmartAlarmCard: View {
                             .stroke(DS.Colors.amber.opacity(0.25), lineWidth: 0.5)
                     )
             )
-            .onAppear { drinkingTonight = bleManager.tonightPlanMode == "alcohol" }
-            .onChange(of: bleManager.tonightPlanMode) { _, mode in
-                drinkingTonight = mode == "alcohol"
-            }
 
             // Status line — green/violet/grey based on enabled + window
             HStack(spacing: 6) {
