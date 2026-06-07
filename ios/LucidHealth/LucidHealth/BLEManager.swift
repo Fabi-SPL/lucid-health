@@ -371,11 +371,20 @@ class BLEManager: NSObject, ObservableObject {
         healthEngine.onSmartAlarmTrigger { [weak self] stage in
             guard let self = self else { return }
             self.log("SMART ALARM! Stage: \(stage.rawValue) — progressive ramp")
+            // Log the wake EXECUTION — strap connectivity is the key unknown when
+            // an alarm "fires but doesn't wake him" (haptic can't reach a dropped
+            // strap). canBuzz = peripheral + command characteristic both present.
+            let canBuzz = self.peripheral != nil && self.cmdToStrap != nil
+            self.evt("alarm_fired", "stage=\(stage.rawValue) canBuzz=\(canBuzz) hr=\(self.heartRate) batt=\(Int(self.battery))%")
             // Each ESCALATION pulse first checks he hasn't already woken from an
             // earlier pulse — no point buzzing harder at someone who's up. Only
             // the gentle opener fires unconditionally (that's the wake itself).
             func escalateIfAsleep(_ pattern: UInt8) {
-                guard !self.healthEngine.isLikelyAwakeNow else { self.forceStopHaptics(); return }
+                if self.healthEngine.isLikelyAwakeNow {
+                    self.evt("alarm_pulse_skip", "pattern=\(pattern) reason=already-awake hr=\(self.heartRate)")
+                    self.forceStopHaptics(); return
+                }
+                self.evt("alarm_pulse", "pattern=\(pattern) canBuzz=\(self.peripheral != nil && self.cmdToStrap != nil)")
                 self.sendHapticRaw(pattern)
             }
             // Gentle opening pulse (pattern 0)
@@ -605,6 +614,15 @@ class BLEManager: NSObject, ObservableObject {
         DispatchQueue.main.async {
             self.debugLog.removeAll()
         }
+    }
+
+    /// High-signal lifecycle event → bridge_logs, so any night is fully
+    /// backtrackable (connect, disconnect, alarm execution, sync, app state).
+    /// Prefixed "evt_" to filter cleanly from the history-sync debug noise.
+    /// NOT for per-reading data — these are infrequent timeline markers.
+    func evt(_ category: String, _ value: String = "") {
+        log("\u{1F4CD} \(category) \(value)")
+        supabase.pushDebugLog(key: "evt_\(category)", value: value)
     }
 
     /// Start periodic push of debug logs to Supabase.
@@ -1949,6 +1967,7 @@ extension BLEManager: CBCentralManagerDelegate {
     func centralManager(_ central: CBCentralManager, didConnect peripheral: CBPeripheral) {
         DispatchQueue.main.async { self.connectTimeout?.invalidate() }
         log("CONNECTED to \(peripheral.name ?? "Whoop")")
+        evt("ble_connected", "name=\(peripheral.name ?? "Whoop") batt=\(Int(battery))%")
         DispatchQueue.main.async { self.connectionState = .connected }
 
         // v68 — new RE session. Regenerate session id and reset the packet counter
@@ -1995,6 +2014,7 @@ extension BLEManager: CBCentralManagerDelegate {
         log("⚠️ DISCONNECTED: \(reason) [domain=\(errorDomain) code=\(errorCode)]")
         log("   State at disconnect: HR=\(heartRate) battery=\(Int(battery))% sleep=\(healthEngine.sleepDetected) readings=\(readingsToday)")
         log("   Session uptime: \(sessionUptimeText)")
+        evt("ble_disconnected", "reason=\(reason) code=\(errorCode) hr=\(heartRate) batt=\(Int(battery))% sleep=\(healthEngine.sleepDetected) uptime=\(sessionUptimeText)")
 
         // CRITICAL: reset history-sync flag on disconnect. If the strap drops
         // mid-history-download, finishHistoryDownload() never fires, and the
@@ -3638,6 +3658,7 @@ extension BLEManager: CBPeripheralDelegate {
         }
         scheduleFallbackAlarm()
         log("Applied tonight plan: mode=\(plan.mode) window=\(plan.windowStartMinutes)-\(plan.windowEndMinutes)")
+        evt("plan_applied", "mode=\(plan.mode) window=\(plan.windowStartMinutes)-\(plan.windowEndMinutes)")
     }
 
     /// Wind-down nudge with a rendered image attachment (first use of
@@ -3735,6 +3756,7 @@ extension BLEManager: CBPeripheralDelegate {
     /// for waking; the phone notification just needs to ping once + show on lock
     /// screen. defaultCritical sound + .timeSensitive bypasses silent/DND.
     private func sendAlarmNotification(stage: HealthEngine.SleepStage) {
+        evt("alarm_notification", "title=\(wakeTitle()) stage=\(stage.rawValue)")
         scheduleAlarmBuzzChain(
             title: wakeTitle(),
             body: "Smart alarm: waking you from \(stage.rawValue) sleep",
