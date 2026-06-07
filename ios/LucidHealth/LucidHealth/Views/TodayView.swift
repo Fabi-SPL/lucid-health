@@ -219,6 +219,7 @@ struct TodayView: View {
         // Reload entries when app comes back to foreground — picks up server-side
         // inserts (e.g. meals logged via REST while app was backgrounded).
         .onChange(of: scenePhase) { _, newPhase in
+            bleManager.evt("app_state", "\(newPhase)")
             if newPhase == .active && hasLoaded {
                 Task { await loadEntries() }
                 // v100 architecture migration — pull fresh server-computed

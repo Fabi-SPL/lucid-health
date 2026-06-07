@@ -370,6 +370,8 @@ extension HealthEngine {
             persistAlarmFired()
             cancelFallbackCallback?()
             print("[SmartAlarm] Already awake in-window — suppressing alarm + cancelling fallback")
+            debugSupabase?.pushDebugLog(event: "evt_alarm_suppressed_awake",
+                details: "stage=\(currentSleepStage.rawValue) reason=already-awake-in-window")
             return
         }
 
