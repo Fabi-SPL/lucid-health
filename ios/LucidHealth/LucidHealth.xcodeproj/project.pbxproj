@@ -75,6 +75,7 @@
 		LH000063 /* StatusChip.swift in Sources */ = {isa = PBXBuildFile; fileRef = LH100063; };
 		LH000064 /* AmbientLiveDot.swift in Sources */ = {isa = PBXBuildFile; fileRef = LH100064; };
 		LH000065 /* HeroRecoveryRing.swift in Sources */ = {isa = PBXBuildFile; fileRef = LH100065; };
+		LH000202 /* BodyBatteryHero.swift in Sources */ = {isa = PBXBuildFile; fileRef = LH100202; };
 		LH000066 /* HRVRingMini.swift in Sources */ = {isa = PBXBuildFile; fileRef = LH100066; };
 		LH000067 /* SparklineChart.swift in Sources */ = {isa = PBXBuildFile; fileRef = LH100067; };
 		LH000068 /* FormatDiversityHint.swift in Sources */ = {isa = PBXBuildFile; fileRef = LH100068; };
@@ -201,6 +202,7 @@
 		LH100063 /* StatusChip.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StatusChip.swift; sourceTree = "<group>"; };
 		LH100064 /* AmbientLiveDot.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AmbientLiveDot.swift; sourceTree = "<group>"; };
 		LH100065 /* HeroRecoveryRing.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HeroRecoveryRing.swift; sourceTree = "<group>"; };
+		LH100202 /* BodyBatteryHero.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BodyBatteryHero.swift; sourceTree = "<group>"; };
 		LH100066 /* HRVRingMini.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HRVRingMini.swift; sourceTree = "<group>"; };
 		LH100067 /* SparklineChart.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SparklineChart.swift; sourceTree = "<group>"; };
 		LH100068 /* FormatDiversityHint.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FormatDiversityHint.swift; sourceTree = "<group>"; };
@@ -360,6 +362,7 @@
 				LH100063 /* StatusChip.swift */,
 				LH100064 /* AmbientLiveDot.swift */,
 				LH100065 /* HeroRecoveryRing.swift */,
+				LH100202 /* BodyBatteryHero.swift */,
 				LH100066 /* HRVRingMini.swift */,
 				LH100067 /* SparklineChart.swift */,
 				LH100068 /* FormatDiversityHint.swift */,
@@ -557,6 +560,7 @@
 				LH000063 /* StatusChip.swift in Sources */,
 				LH000064 /* AmbientLiveDot.swift in Sources */,
 				LH000065 /* HeroRecoveryRing.swift in Sources */,
+				LH000202 /* BodyBatteryHero.swift in Sources */,
 				LH000066 /* HRVRingMini.swift in Sources */,
 				LH000067 /* SparklineChart.swift in Sources */,
 				LH000068 /* FormatDiversityHint.swift in Sources */,

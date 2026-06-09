@@ -511,6 +511,41 @@ class SupabaseClient {
         return (c.hour ?? 0) * 60 + (c.minute ?? 0)
     }
 
+    // MARK: - Body Battery v2 (reservoir tank)
+
+    /// Refresh the server reservoir and return today's anchor — the carry-over
+    /// tank level the live on-device battery seeds from at wake. nil on failure
+    /// (app safely falls back to its local battery value).
+    func fetchBodyBatteryAnchor() async -> Double? {
+        do {
+            try await ensureAuth()
+            guard let token = accessToken else { return nil }
+            let body: [String: Any] = ["p_user_id": userId]
+            let url = URL(string: "\(baseURL)/rest/v1/rpc/refresh_body_battery")!
+            var req = URLRequest(url: url)
+            req.httpMethod = "POST"
+            req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+            req.setValue(anonKey, forHTTPHeaderField: "apikey")
+            req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+            req.httpBody = try JSONSerialization.data(withJSONObject: body)
+            let (data, resp) = try await session.data(for: req)
+            let code = (resp as? HTTPURLResponse)?.statusCode ?? 0
+            guard code < 300 else { log("refresh_body_battery HTTP \(code)"); return nil }
+            // RPC returns a bare numeric (e.g. 52.8) — allow JSON fragments.
+            if let n = try? JSONSerialization.jsonObject(with: data, options: [.fragmentsAllowed]) as? NSNumber {
+                return n.doubleValue
+            }
+            if let s = String(data: data, encoding: .utf8),
+               let d = Double(s.trimmingCharacters(in: .whitespacesAndNewlines)) {
+                return d
+            }
+            return nil
+        } catch {
+            log("refresh_body_battery error: \(error.localizedDescription)")
+            return nil
+        }
+    }
+
     // MARK: - Wake-Up Notification
 
     func notifyWakeUp(completion: @escaping (Bool) -> Void) {

@@ -498,15 +498,15 @@ struct TodayView: View {
             // 180pt ring — biggest thing on screen (principle #10)
             // v103 — switchable: Classic (continuous gradient) or Smoke (Mode A
             // with recovery-tinted wisps off the trim tip). Settings → Display.
-            Group {
-                switch ringStyle {
-                case .classic:
-                    HeroRecoveryRing(score: engine.recoveryScore)
-                case .smoke:
-                    SmokeRecoveryRing(score: engine.recoveryScore)
-                }
-            }
-                .statusGlow(DS.Colors.recoveryColor(engine.recoveryScore), intensity: 0.7)
+            // Body Battery is now the hero (the "how much can I push" tank).
+            // Recovery is demoted into the secondary strip inside this card.
+            BodyBatteryHero(
+                level: engine.bodyBattery,
+                recovery: engine.recoveryScore,
+                sleepHours: engine.sleepDurationHours,
+                strain: engine.strainScore
+            )
+                .statusGlow(DS.Colors.bodyBatteryColor(engine.bodyBattery), intensity: 0.7)
                 .padding(.top, DS.Spacing.sm)
 
             // v106: alcohol-night chip. Gives context to a low score so the
