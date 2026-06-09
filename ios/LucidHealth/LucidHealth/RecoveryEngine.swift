@@ -76,18 +76,10 @@ extension HealthEngine {
             self.recoveryLockedDate = today
             UserDefaults.standard.set(today, forKey: self.recoveryLockedDateKey)
 
-            // Body Battery seed — use whatever recovery server has given us
-            // v106 fix: was `> 0` — but 0 is a valid recovery (alcohol/burnout).
-            // Use a sentinel approach instead: check if the server fetched anything.
-            if self.recoveryScore >= 0 && self.recoveryLockedDate != nil {
-                let hrvDelta = hrvForCompute > 0 ? hrvForCompute - hrvBaseline : 0
-                let seed = (self.recoveryScore * 0.7) + 25.0 + (hrvDelta * 0.5)
-                self.bodyBattery = min(max(seed, 15), 100)
-                self.saveBodyBattery()
-                print("[Recovery] v102 day-lock. Server recovery: \(Int(self.recoveryScore)). Body Battery seeded: \(Int(self.bodyBattery))%")
-            } else {
-                print("[Recovery] v102 day-lock. Server recovery not yet loaded — body battery untouched.")
-            }
+            // v121: Body Battery is NO LONGER seeded from recovery here — recovery
+            // is the memoryless source we moved away from. The tank now comes
+            // from the server reservoir anchor (fetched in the Task below + by
+            // fetchBaseline's body_battery column read). Nothing to seed locally.
 
             self.sleepPeriodRMSSDSamples.removeAll()
         }
@@ -240,38 +232,15 @@ extension HealthEngine {
     // to 100 daily. Drains by HR-zone, recharges in sleep + parasympathetic rest.
     // VO2max modifier reduces drain rate for fitter users (Firstbeat doc).
 
-    /// Update body battery based on current state — call every ~30s
+    /// Update body battery — DISABLED (v121). Body Battery is now 100%
+    /// server-authoritative: the carry-over reservoir anchor (v118) minus a
+    /// server-side intraday drain (v119), refreshed every 15 min. The old
+    /// on-device engine RECHARGED during waking rest (sitting tired read as
+    /// "recovering"), drifted up to ~90, and overwrote the correct server value
+    /// in the DB. No-op now — the app only fetches + displays. Tune the model
+    /// server-side; do NOT reintroduce on-device drain/recharge here.
     func updateBodyBattery(hr: Int) {
-        let zone = hrZone(for: Double(hr))
-
-        // VO2max modifier — fitter user drains slower (Firstbeat). Centered at
-        // population mean ~40; clamps to 0.7..1.3 so the effect is bounded.
-        let vo2 = vo2maxEstimate > 0 ? vo2maxEstimate : 40
-        let vo2Modifier = min(max(40.0 / vo2, 0.7), 1.3)
-
-        if sleepDetected {
-            let rechargeRate: Double
-            switch currentSleepStage {
-            case .deep: rechargeRate = calibration.rechargeDeep
-            case .rem: rechargeRate = calibration.rechargeREM
-            case .light: rechargeRate = calibration.rechargeLight
-            case .awake: rechargeRate = 0.0
-            }
-            bodyBattery = min(100, bodyBattery + rechargeRate)
-        } else {
-            // Drain modulated by fitness — fitter users keep battery longer
-            let drain = calibration.depletionRates[min(zone, 4)] * vo2Modifier
-            bodyBattery = max(0, bodyBattery - drain)
-        }
-
-        // Slight recharge during rest (zone 0, not sleeping, good parasympathetic tone).
-        // This is what allows BB to climb during meditation, quiet work, lying down.
-        if !sleepDetected && zone == 0 && currentRMSSD > baselineHRV * 0.8 {
-            bodyBattery = min(100, bodyBattery + calibration.restingRechargeRate)
-        }
-
-        // Persist every update so cold start sees a fresh value, not 100
-        saveBodyBattery()
+        return
     }
 
     // MARK: - Training Load Intelligence

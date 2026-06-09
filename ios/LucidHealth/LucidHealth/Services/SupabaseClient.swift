@@ -341,7 +341,9 @@ class SupabaseClient {
                 if trainingMonotony > 0 { body["training_monotony"] = round(trainingMonotony * 100) / 100 }
                 if trainingStrain > 0 { body["training_strain"] = round(trainingStrain * 10) / 10 }
                 if acwr > 0 { body["acwr"] = round(acwr * 100) / 100 }
-                if bodyBattery > 0 && bodyBattery < 100 { body["body_battery"] = round(bodyBattery) }
+                // v121: do NOT write body_battery — the server owns this column now
+                // (reservoir + live drain). The app writing its on-device value was
+                // overwriting the correct server value. Read-only from here.
 
                 // Quick-win health experiments (Apr 2026)
                 if poincaréSD1 > 0 { body["poincare_sd1"] = round(poincaréSD1 * 10) / 10 }
