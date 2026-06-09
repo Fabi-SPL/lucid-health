@@ -45,6 +45,7 @@ extension HealthEngine {
             computePNN50()
             computePoincaré()
             computeRespiratoryRate()
+            computeCoherenceScore()
         }
 
         // DFA α1 needs 120+ intervals — compute less frequently
@@ -364,6 +365,94 @@ extension HealthEngine {
             DispatchQueue.main.async {
                 self.respiratoryRate = bpm
             }
+        }
+    }
+
+    // MARK: - Cardiac Coherence (HeartMath 0.1 Hz spectral ratio)
+    //
+    // During paced 6-breaths/min breathing, HR oscillation concentrates into a
+    // single sharp peak near 0.1 Hz. Coherence = power in a narrow window around
+    // that peak / total LF-band power. Returns 0...1 (incoherent ~0.1-0.2, well
+    // paced ~0.4-0.8). Real band-limited DFT on the RR tachogram, replacing the
+    // old RMSSD-ratio proxy in CoherenceDrillView. Runs on the BLE delegate
+    // queue (called from addRRInterval, same queue rrBuffer is mutated on, so no
+    // race), publishes to main like respiratoryRate.
+    func computeCoherenceScore() {
+        guard rrBuffer.count >= 30 else { return }
+
+        // Last ~64 seconds of beats (need >=5 cycles of the 0.1 Hz rhythm).
+        var window: [Double] = []
+        var acc = 0.0
+        for rr in rrBuffer.reversed() {
+            window.append(rr)
+            acc += rr / 1000.0
+            if acc >= 64 { break }
+        }
+        window.reverse()
+        guard window.count >= 20 else { return }
+
+        // Interpolate the RR tachogram to an evenly-sampled 4 Hz signal.
+        let fs = 4.0
+        let totalDur = window.reduce(0, +) / 1000.0
+        let n = Int(totalDur * fs)
+        guard n >= 32 else { return }
+
+        var cumTime: [Double] = [0]
+        for rr in window { cumTime.append(cumTime.last! + rr / 1000.0) }
+
+        var sig = [Double](repeating: 0, count: n)
+        for i in 0..<n {
+            let t = Double(i) / fs
+            var j = 0
+            while j < cumTime.count - 1 && cumTime[j + 1] < t { j += 1 }
+            if j < window.count { sig[i] = window[j] }
+        }
+
+        // Remove mean + Hann window (cut spectral leakage).
+        let mean = sig.reduce(0, +) / Double(n)
+        for i in 0..<n {
+            let hann = 0.5 - 0.5 * cos(2.0 * Double.pi * Double(i) / Double(n - 1))
+            sig[i] = (sig[i] - mean) * hann
+        }
+
+        // Band-limited DFT: power across 0.04...0.40 Hz.
+        let fStep = 0.005
+        var freqs: [Double] = []
+        var power: [Double] = []
+        var f = 0.04
+        while f <= 0.40 + 1e-9 {
+            var re = 0.0, im = 0.0
+            let w = 2.0 * Double.pi * f / fs
+            for i in 0..<n {
+                re += sig[i] * cos(w * Double(i))
+                im -= sig[i] * sin(w * Double(i))
+            }
+            freqs.append(f)
+            power.append(re * re + im * im)
+            f += fStep
+        }
+
+        let total = power.reduce(0, +)
+        guard total > 0 else { return }
+
+        // Peak in the coherence band (0.04...0.15 Hz; 6/min breathing = 0.1 Hz).
+        var peakIdx = -1
+        var peakVal = -1.0
+        for (i, fr) in freqs.enumerated() where fr >= 0.04 && fr <= 0.15 {
+            if power[i] > peakVal { peakVal = power[i]; peakIdx = i }
+        }
+        guard peakIdx >= 0 else { return }
+
+        // Power within +/-0.015 Hz of the peak.
+        let peakF = freqs[peakIdx]
+        var peakBand = 0.0
+        for (i, fr) in freqs.enumerated() where abs(fr - peakF) <= 0.015 {
+            peakBand += power[i]
+        }
+
+        let coherence = min(max(peakBand / total, 0), 1)
+        DispatchQueue.main.async {
+            self.currentCoherence = coherence
         }
     }
 

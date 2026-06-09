@@ -5,8 +5,8 @@ import SwiftUI
 //
 // Pattern stolen from HeartMath's Inner Balance (200+ peer-reviewed studies).
 // At 6 breaths per minute (resonance frequency), HR oscillation peaks —
-// this is the parasympathetic sweet spot. Score = ratio of session RMSSD
-// to pre-session baseline RMSSD, capped at 1.0.
+// this is the parasympathetic sweet spot. Score = 0.1 Hz spectral power
+// ratio (real coherence) from the live RR tachogram, 0 to 1.
 //
 // Real-time coherence visualization: the bouncing sphere paces breath.
 // User syncs breath with sphere → HRV climbs → score climbs.
@@ -405,13 +405,13 @@ struct CoherenceDrillView: View {
         if rmssd > 0 { sessionRMSSDSamples.append(rmssd) }
         if hr > 0 { sessionHRSamples.append(hr) }
 
-        // Coherence proxy: ratio of session avg RMSSD to pre-session baseline.
-        // True coherence = 0.1Hz spectral power; this is a real-time proxy that
-        // climbs when RSA peaks during paced breathing. Capped at 1.0.
-        if sessionStartRMSSD > 0 && rmssd > 0 {
-            let ratio = avgRMSSD / sessionStartRMSSD
-            liveCoherence = min(max(ratio - 0.5, 0.0) / 1.5, 1.0)
-            if liveCoherence > peakCoherence { peakCoherence = liveCoherence }
+        // Real coherence: 0.1 Hz spectral power ratio from the live RR tachogram
+        // (HealthEngine.computeCoherenceScore → currentCoherence). Replaces the
+        // old RMSSD-ratio proxy. Climbs as the user locks onto the 6/min pace.
+        let coh = bleManager.healthEngine.currentCoherence
+        if coh > 0 {
+            liveCoherence = coh
+            if coh > peakCoherence { peakCoherence = coh }
         }
     }
 
