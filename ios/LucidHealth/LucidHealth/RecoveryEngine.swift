@@ -112,6 +112,19 @@ extension HealthEngine {
                     print("[Recovery] v102 server recompute landed: \(Int(r))")
                 }
             }
+            // Body Battery v2 — seed the live battery from the carry-over reservoir
+            // anchor (server), NOT memoryless recovery. The live engine
+            // (updateBodyBattery) drains this through the day. This is the fix for
+            // "92% recovery but I feel like shit" — the tank remembers, recovery doesn't.
+            let anchor = await SupabaseClient.shared.fetchBodyBatteryAnchor()
+            await MainActor.run {
+                guard let self else { return }
+                if let a = anchor {
+                    self.bodyBattery = min(max(a, 5), 100)
+                    self.saveBodyBattery()
+                    print("[BodyBattery] seeded from reservoir anchor: \(Int(a))")
+                }
+            }
         }
     }
 
