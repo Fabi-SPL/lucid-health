@@ -27,6 +27,7 @@ class HealthEngine: ObservableObject {
     @Published var lnRMSSD: Double = 0
     @Published var readiness: ReadinessLevel = .unknown
     @Published var respiratoryRate: Double = 0  // breaths per minute
+    @Published var currentCoherence: Double = 0  // HeartMath 0.1 Hz coherence ratio (0...1)
     @Published var sleepDetected: Bool = false
 
     // Research-backed HRV metrics (Shaffer & Ginsberg 2017)
