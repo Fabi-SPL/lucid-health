@@ -285,6 +285,20 @@ struct TodayView: View {
                         .scrollSectionTransition()
                 }
 
+                // GO BACK OR GET UP? — in-window wake coach. Surfaces when Fabi
+                // wakes early: either he tapped "I'm awake" (→ justWokeUp) or it's
+                // the 05–10 morning window before he's confirmed up. Asks the server
+                // for a personalized go-back / get-up call and (if go-back) arms a
+                // gentle wake at his next cycle boundary. Once per day.
+                if modeStore.current == .justWokeUp || modeStore.current == .morning {
+                    WakeCoachCard(bleManager: bleManager)
+                        .padding(.horizontal, DS.Spacing.md)
+                        .padding(.top, DS.Spacing.md)
+                        .opacity(appeared ? 1 : 0)
+                        .animation(DS.Anim.cardAppear, value: appeared)
+                        .scrollSectionTransition()
+                }
+
                 RecoveryOverlayBanner(overlay: overlay)
                     .padding(.top, DS.Spacing.sm)
                     .opacity(appeared ? 1 : 0)
@@ -913,6 +927,157 @@ private struct FastingBanner: View {
 // trigger inside SleepEngine.checkSmartAlarm() runs every ~30s while BLE
 // is streaming and fires earlier when light sleep is detected, then
 // cancels the fallback.
+// WakeCoachCard — "Go back or get up?" The in-window decision helper. When Fabi
+// wakes before his sleep target, it asks plan_back_to_sleep and shows ONE verdict
+// + action. If he goes back, it arms a gentle wake at his next boundary so he
+// never gets woken mid-cycle (the thing that makes going back feel pointless).
+// Shows once per day (UserDefaults date guard).
+private struct WakeCoachCard: View {
+    @ObservedObject var bleManager: BLEManager
+
+    @State private var plan: BackToSleepPlan?
+    @State private var loading = true
+    @State private var dismissed = false
+
+    @AppStorage("lucid_goback_handled_date") private var handledDate: String = ""
+
+    private var todayKey: String {
+        let f = DateFormatter(); f.dateFormat = "yyyy-MM-dd"
+        return f.string(from: Date())
+    }
+    private var alreadyHandled: Bool { handledDate == todayKey }
+    private var accent: Color {
+        (plan?.shouldGoBack ?? false) ? DS.Colors.violet : DS.Colors.warning
+    }
+
+    var body: some View {
+        if dismissed || alreadyHandled {
+            EmptyView()
+        } else {
+            content.task { await load() }
+        }
+    }
+
+    private var content: some View {
+        VStack(alignment: .leading, spacing: DS.Spacing.md) {
+            HStack(spacing: 8) {
+                Image(systemName: "bed.double.fill")
+                    .font(.system(size: 15, weight: .semibold))
+                    .foregroundStyle(accent)
+                    .symbolRenderingMode(.hierarchical)
+                Text("GO BACK OR GET UP?")
+                    .font(.system(size: 10, weight: .bold))
+                    .foregroundStyle(DS.Colors.textFaint)
+                    .tracking(1.2)
+                Spacer()
+            }
+
+            if loading {
+                HStack(spacing: 8) {
+                    ProgressView().tint(DS.Colors.textMuted)
+                    Text("Checking your night\u{2026}")
+                        .font(.system(size: 13))
+                        .foregroundStyle(DS.Colors.textSecondary)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.vertical, 4)
+            } else if let plan = plan {
+                Text(plan.headline)
+                    .font(.system(size: 19, weight: .semibold, design: .rounded))
+                    .tracking(-0.3)
+                    .foregroundStyle(DS.Colors.textPrimary)
+                Text(plan.detail)
+                    .font(.system(size: 13))
+                    .foregroundStyle(DS.Colors.textSecondary)
+                    .lineSpacing(3)
+                    .fixedSize(horizontal: false, vertical: true)
+                actions(for: plan)
+            } else {
+                Text("Couldn't reach your sleep data. Trust your gut \u{2014} under an hour left, just get up.")
+                    .font(.system(size: 13))
+                    .foregroundStyle(DS.Colors.textSecondary)
+                Button { handle() } label: {
+                    Text("Got it")
+                        .font(.system(size: 14, weight: .semibold))
+                        .foregroundStyle(DS.Colors.textMuted)
+                }
+            }
+        }
+        .padding(DS.Spacing.md)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(
+            RoundedRectangle(cornerRadius: 22, style: .continuous)
+                .fill(.ultraThinMaterial)
+                .overlay(
+                    RoundedRectangle(cornerRadius: 22, style: .continuous)
+                        .fill(accent.opacity(0.06))
+                )
+                .overlay(
+                    RoundedRectangle(cornerRadius: 22, style: .continuous)
+                        .stroke(Color.white.opacity(0.12), lineWidth: 0.5)
+                )
+        )
+    }
+
+    @ViewBuilder
+    private func actions(for plan: BackToSleepPlan) -> some View {
+        if plan.shouldGoBack {
+            VStack(spacing: 8) {
+                Button {
+                    if let w = plan.wakeAt { bleManager.armGoBackWake(at: w) }
+                    UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+                    handle()
+                } label: {
+                    Text(plan.wakeLabel.isEmpty
+                         ? "Sleep \u{2014} wake me at my time"
+                         : "Sleep \u{2014} wake me at \(plan.wakeLabel)")
+                        .font(.system(size: 15, weight: .semibold, design: .rounded))
+                        .foregroundStyle(.white)
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 14)
+                        .background(Capsule().fill(DS.Colors.violet))
+                }
+                Button { handle() } label: {
+                    Text("I'm up anyway")
+                        .font(.system(size: 13, weight: .medium))
+                        .foregroundStyle(DS.Colors.textMuted)
+                }
+            }
+        } else {
+            Button {
+                UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                handle()
+            } label: {
+                Text("Start my day")
+                    .font(.system(size: 15, weight: .semibold, design: .rounded))
+                    .foregroundStyle(.white)
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 14)
+                    .background(Capsule().fill(DS.Colors.warning))
+            }
+        }
+    }
+
+    private func load() async {
+        let start = await currentSleepStart()
+        let result = await SupabaseClient.shared.planBackToSleep(sleepStart: start)
+        await MainActor.run {
+            self.plan = result
+            self.loading = false
+        }
+    }
+
+    @MainActor
+    private func currentSleepStart() -> Date {
+        bleManager.healthEngine.sleepStartTime ?? Calendar.current.startOfDay(for: Date())
+    }
+
+    private func handle() {
+        handledDate = todayKey
+        withAnimation(.easeOut(duration: 0.25)) { dismissed = true }
+    }
+}
+
 private struct SmartAlarmCard: View {
     @ObservedObject var bleManager: BLEManager
 

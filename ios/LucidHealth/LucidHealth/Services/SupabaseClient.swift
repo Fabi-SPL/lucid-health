@@ -18,6 +18,21 @@ struct TonightPlan {
     var isAlcohol: Bool { mode == "alcohol" }
 }
 
+/// Verdict from the server `plan_back_to_sleep` RPC — the in-window "should I
+/// go back to sleep or just get up?" coach. Computed from his personalized
+/// sleep target + current 7-day sleep debt + a 90-min cycle.
+struct BackToSleepPlan {
+    let verdict: String        // "go_back" | "get_up"
+    let headline: String
+    let detail: String
+    let wakeAt: Date?          // when to arm a gentle wake, if go_back
+    let wakeLabel: String      // "08:27" (Berlin) — for the button label
+    let minutesLeft: Int
+    let sleptH: Double
+    let debtH: Double
+    var shouldGoBack: Bool { verdict == "go_back" }
+}
+
 class SupabaseClient {
 
     // Singleton — shared by app + BLEManager + Foods views
@@ -509,6 +524,67 @@ class SupabaseClient {
         guard let date = withFrac.date(from: iso) ?? plain.date(from: iso) else { return nil }
         let c = Calendar.current.dateComponents([.hour, .minute], from: date)
         return (c.hour ?? 0) * 60 + (c.minute ?? 0)
+    }
+
+    /// In-window wake coach. Pass when the user fell asleep (HealthEngine
+    /// .sleepStartTime); the server returns a go-back / get-up verdict tuned to
+    /// his personalized sleep target + debt + a 90-min cycle. Returns nil on
+    /// any failure so the card just hides itself.
+    func planBackToSleep(sleepStart: Date) async -> BackToSleepPlan? {
+        do {
+            try await ensureAuth()
+            guard let token = accessToken else { return nil }
+            let iso = ISO8601DateFormatter()
+            iso.formatOptions = [.withInternetDateTime]
+            let body: [String: Any] = [
+                "p_user_id": userId,
+                "p_sleep_start": iso.string(from: sleepStart)
+            ]
+            let url = URL(string: "\(baseURL)/rest/v1/rpc/plan_back_to_sleep")!
+            var req = URLRequest(url: url)
+            req.httpMethod = "POST"
+            req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+            req.setValue(anonKey, forHTTPHeaderField: "apikey")
+            req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+            req.httpBody = try JSONSerialization.data(withJSONObject: body)
+            let (data, resp) = try await session.data(for: req)
+            let code = (resp as? HTTPURLResponse)?.statusCode ?? 0
+            guard code < 300 else { log("plan_back_to_sleep HTTP \(code)"); return nil }
+
+            let obj: [String: Any]?
+            if let arr = try JSONSerialization.jsonObject(with: data) as? [[String: Any]] {
+                obj = arr.first
+            } else {
+                obj = try JSONSerialization.jsonObject(with: data) as? [String: Any]
+            }
+            guard let p = obj else { return nil }
+
+            let verdict = (p["verdict"] as? String) ?? "get_up"
+            let headline = (p["headline"] as? String) ?? ""
+            let detail = (p["detail"] as? String) ?? ""
+            let wakeLabel = (p["wake_label"] as? String) ?? ""
+            let minsLeft = (p["minutes_left"] as? NSNumber)?.intValue ?? 0
+            let sleptH = (p["slept_h"] as? NSNumber)?.doubleValue ?? 0
+            let debtH = (p["debt_h"] as? NSNumber)?.doubleValue ?? 0
+            let wakeAt = localDate(fromISO: p["wake_at"] as? String)
+            log("plan_back_to_sleep → \(verdict) left=\(minsLeft)m")
+            return BackToSleepPlan(verdict: verdict, headline: headline, detail: detail,
+                                   wakeAt: wakeAt, wakeLabel: wakeLabel, minutesLeft: minsLeft,
+                                   sleptH: sleptH, debtH: debtH)
+        } catch {
+            log("plan_back_to_sleep error: \(error.localizedDescription)")
+            return nil
+        }
+    }
+
+    /// Parse an ISO8601 timestamptz string into a full Date (for scheduling).
+    private func localDate(fromISO iso: String?) -> Date? {
+        guard let iso = iso else { return nil }
+        let withFrac = ISO8601DateFormatter()
+        withFrac.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        let plain = ISO8601DateFormatter()
+        plain.formatOptions = [.withInternetDateTime]
+        return withFrac.date(from: iso) ?? plain.date(from: iso)
     }
 
     // MARK: - Body Battery v2 (reservoir tank)
