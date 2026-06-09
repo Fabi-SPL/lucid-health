@@ -3629,6 +3629,41 @@ extension BLEManager: CBPeripheralDelegate {
         log("Fallback alarm cancelled")
     }
 
+    // MARK: - Go-Back-To-Sleep wake (in-window coach)
+
+    /// Arm a one-off gentle wake at a specific time — used by the "go back to
+    /// sleep?" coach when Fabi chooses to grab one more cycle. Uses its OWN id so
+    /// it never clobbers the nightly fallback alarm. Re-arming replaces it.
+    func armGoBackWake(at date: Date) {
+        let center = UNUserNotificationCenter.current()
+        center.removePendingNotificationRequests(withIdentifiers: ["lucid_goback_wake"])
+        let now = Date()
+        guard date > now else { return }
+
+        let calendar = Calendar.current
+        let comps = calendar.dateComponents(
+            [.year, .month, .day, .hour, .minute, .second], from: date
+        )
+        let content = UNMutableNotificationContent()
+        content.title = "\u{2600}\u{FE0F} Time to get up"
+        content.body = "Your extra cycle's done — easy does it."
+        content.sound = UNNotificationSound.defaultCritical
+        content.interruptionLevel = .timeSensitive
+        content.threadIdentifier = fallbackAlarmId
+        let trigger = UNCalendarNotificationTrigger(dateMatching: comps, repeats: false)
+        let request = UNNotificationRequest(
+            identifier: "lucid_goback_wake", content: content, trigger: trigger
+        )
+        center.add(request) { [weak self] error in
+            if let error = error {
+                self?.log("Go-back wake schedule FAILED: \(error.localizedDescription)")
+            }
+        }
+        let h = calendar.component(.hour, from: date)
+        let m = calendar.component(.minute, from: date)
+        log("Go-back wake armed at \(h):\(String(format: "%02d", m))")
+    }
+
     // MARK: - Tonight Plan Sync (Smart Alarm Module 7)
 
     /// Pull tonight's plan from the server and apply it. Safe to call on app
