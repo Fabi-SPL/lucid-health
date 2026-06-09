@@ -235,6 +235,11 @@ struct TodayView: View {
                     }
                     let trend = await bleManager.supabase.fetchRecoveryTrend()
                     await MainActor.run { recoveryTrend = trend }
+                    // v121: pull the server-authoritative Body Battery (reservoir
+                    // − live drain) on every foreground. App is display-only now.
+                    if let bb = await bleManager.supabase.fetchBodyBatteryAnchor() {
+                        await MainActor.run { bleManager.healthEngine.bodyBattery = bb }
+                    }
                 }
                 Task { await bleManager.syncTonightPlan() }
             }
