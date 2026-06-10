@@ -196,8 +196,8 @@ jobs:
             "versionDate": "${BUILD_DATE_ISO}",
             "downloadURL": "${DOWNLOAD_URL}",
             "size": ${IPA_SIZE},
-            "minOSVersion": "26.0",
-            "versions": [{"version":"1.0.${RUN_NUMBER}","buildVersion":"${RUN_NUMBER}","date":"${BUILD_DATE_ISO}","size":${IPA_SIZE},"downloadURL":"${DOWNLOAD_URL}","localizedDescription":"Build ${RUN_NUMBER}","minOSVersion":"26.0"}],
+            "minOSVersion": "16.0",
+            "versions": [{"version":"1.0.${RUN_NUMBER}","buildVersion":"${RUN_NUMBER}","date":"${BUILD_DATE_ISO}","size":${IPA_SIZE},"downloadURL":"${DOWNLOAD_URL}","localizedDescription":"Build ${RUN_NUMBER}","minOSVersion":"16.0"}],
             "appPermissions": {"entitlements":[{"name":"com.apple.security.application-groups"}],"privacy":[{"name":"NSBluetoothAlwaysUsageDescription","usageDescription":"Connects to Whoop via BLE."},{"name":"NSBluetoothPeripheralUsageDescription","usageDescription":"Connects to Whoop via BLE (legacy peripheral key)."},{"name":"NSCameraUsageDescription","usageDescription":"Take photos of meals."},{"name":"NSPhotoLibraryUsageDescription","usageDescription":"Pick existing meal photos."},{"name":"NSHealthShareUsageDescription","usageDescription":"Reads health data from Apple Health for body-state correlation."},{"name":"NSHealthUpdateUsageDescription","usageDescription":"Writes recovery and HRV data back to Apple Health."},{"name":"NSLocationWhenInUseUsageDescription","usageDescription":"Tags meals and body-state snapshots with location."},{"name":"NSLocationAlwaysAndWhenInUseUsageDescription","usageDescription":"Background location for activity context (rides, walks)."}]}
           }
           JSONEND
