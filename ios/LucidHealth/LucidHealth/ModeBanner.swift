@@ -31,7 +31,7 @@ struct ModeBanner: View {
                 .textCase(.uppercase)
                 .kerning(1.2)
 
-            Button(action: { modeStore.tapImAwake() }) {
+            Button(action: { DS.Haptic.commit(); modeStore.tapImAwake() }) {
                 HStack(spacing: 12) {
                     Image(systemName: "sun.max.fill")
                         .font(.system(size: 22, weight: .semibold))

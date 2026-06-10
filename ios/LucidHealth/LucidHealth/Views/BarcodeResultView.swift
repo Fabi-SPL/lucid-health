@@ -142,7 +142,7 @@ struct BarcodeResultView: View {
                 Button { save() } label: {
                     HStack {
                         if isSaving { ProgressView().tint(.white).padding(.trailing, 4) }
-                        Text(isSaving ? "Speichern…" : "Passt · Speichern")
+                        Text(isSaving ? "Saving…" : "Looks right · Save")
                             .font(DS.Font.bodyMed)
                     }
                     .frame(maxWidth: .infinity)

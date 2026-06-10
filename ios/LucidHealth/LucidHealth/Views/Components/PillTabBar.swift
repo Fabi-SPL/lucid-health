@@ -38,12 +38,13 @@ struct PillTabBar: View {
                     tabItem(tab)
                 }
                 .buttonStyle(.plain)
-                .sensoryFeedback(.selection, trigger: selectedTab)
             }
         }
         .padding(.horizontal, 8)
         .padding(.vertical, 6)
         .frame(height: 56)                      // hard-cap height — iOS 26 .glassEffect won't blow up
+        // ONE selection haptic per switch — was inside the ForEach (fired 4× per tap).
+        .sensoryFeedback(.selection, trigger: selectedTab)
         .glassEffect(.regular, in: .capsule)    // capsule-shaped glass directly (was .glassDefault rect)
         .overlay(
             Capsule()

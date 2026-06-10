@@ -129,8 +129,25 @@ enum DS {
                 ? UIColor(red: 0.545, green: 0.361, blue: 0.965, alpha: 0.15)
                 : UIColor(red: 0.486, green: 0.361, blue: 0.749, alpha: 0.15)
         })
-        static let borderViolet = Color(hex: 0x8B7CF6).opacity(0.18)
-        static let borderTeal = Color(hex: 0x4FD1C5).opacity(0.15)
+        // Adaptive accent borders (were fixed dark-mode hex — invisible-ish in light)
+        static let borderViolet = Color(UIColor { tc in
+            tc.userInterfaceStyle == .dark
+                ? UIColor(red: 0.545, green: 0.486, blue: 0.965, alpha: 0.18)
+                : UIColor(red: 0.486, green: 0.361, blue: 0.749, alpha: 0.22)
+        })
+        static let borderTeal = Color(UIColor { tc in
+            tc.userInterfaceStyle == .dark
+                ? UIColor(red: 0.310, green: 0.820, blue: 0.773, alpha: 0.15)
+                : UIColor(red: 0.051, green: 0.580, blue: 0.533, alpha: 0.20)
+        })
+
+        /// Shimmer/specular highlight — white reads on dark glass, but is
+        /// invisible white-on-white in light mode. Violet-tinted there instead.
+        static let shimmer = Color(UIColor { tc in
+            tc.userInterfaceStyle == .dark
+                ? UIColor(white: 1.0, alpha: 1.0)
+                : UIColor(red: 0.486, green: 0.361, blue: 0.749, alpha: 1.0)
+        })
 
         // Recovery zones
         static func recoveryColor(_ score: Double) -> Color {
@@ -284,6 +301,21 @@ enum DS {
         static let success = DS.Colors.success.opacity(0.30)
         static let amber = DS.Colors.amber.opacity(0.30)
         static let danger = DS.Colors.danger.opacity(0.30)
+    }
+
+    // MARK: - Haptics (one vocabulary, app-wide)
+    // Four verbs only. Every interactive surface speaks the same touch language:
+    //   tap     — navigation, chips, toggles, anything light
+    //   commit  — state-changing actions (start/end/save-intent/wake)
+    //   success — a save/write confirmed
+    //   error   — a save/write failed
+    //   select  — tab/segment selection (UISelectionFeedback)
+    enum Haptic {
+        static func tap()     { UIImpactFeedbackGenerator(style: .light).impactOccurred() }
+        static func commit()  { UIImpactFeedbackGenerator(style: .medium).impactOccurred() }
+        static func success() { UINotificationFeedbackGenerator().notificationOccurred(.success) }
+        static func error()   { UINotificationFeedbackGenerator().notificationOccurred(.error) }
+        static func select()  { UISelectionFeedbackGenerator().selectionChanged() }
     }
 
     // MARK: - Category dot colors (principle #5)
@@ -512,11 +544,11 @@ struct GlassDefault: ViewModifier {
                 in: .rect(cornerRadius: DS.Radius.lg)
             )
             .overlay(alignment: .top) {
-                // inner shimmer top edge
+                // inner shimmer top edge (adaptive — violet-tinted in light mode)
                 RoundedRectangle(cornerRadius: DS.Radius.lg, style: .continuous)
                     .fill(
                         LinearGradient(
-                            colors: [Color.white.opacity(0.08), .clear],
+                            colors: [DS.Colors.shimmer.opacity(0.08), .clear],
                             startPoint: .top, endPoint: .init(x: 0.5, y: 0.15)
                         )
                     )
@@ -620,6 +652,33 @@ struct GlassCard: ViewModifier {
     }
 }
 
+/// Accent glass card — a standard glass card tinted by a status color. For cards
+/// that carry meaning through color (wake-coach verdict, smart-alarm enabled,
+/// last-night signal). Same glass DNA as every other card so accent surfaces stop
+/// reading as a bolted-on different app. Caller keeps its own content padding.
+struct AccentGlassCard: ViewModifier {
+    var tint: Color
+    var active: Bool = true
+    var radius: CGFloat = DS.Radius.lg
+
+    func body(content: Content) -> some View {
+        content
+            .background(
+                RoundedRectangle(cornerRadius: radius, style: .continuous)
+                    .fill(.ultraThinMaterial)
+            )
+            .background(
+                RoundedRectangle(cornerRadius: radius, style: .continuous)
+                    .fill(tint.opacity(active ? 0.08 : 0.035))
+            )
+            .clipShape(RoundedRectangle(cornerRadius: radius, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: radius, style: .continuous)
+                    .stroke(tint.opacity(active ? 0.28 : 0.12), lineWidth: 0.5)
+            )
+    }
+}
+
 struct HeroCard: ViewModifier {
     var color: Color = DS.Colors.violet
 
@@ -662,9 +721,9 @@ struct SpecularShimmer: View {
                     LinearGradient(
                         stops: [
                             .init(color: .clear, location: 0.0),
-                            .init(color: Color.white.opacity(0.08), location: 0.48),
-                            .init(color: Color.white.opacity(0.16), location: 0.50),
-                            .init(color: Color.white.opacity(0.08), location: 0.52),
+                            .init(color: DS.Colors.shimmer.opacity(0.08), location: 0.48),
+                            .init(color: DS.Colors.shimmer.opacity(0.16), location: 0.50),
+                            .init(color: DS.Colors.shimmer.opacity(0.08), location: 0.52),
                             .init(color: .clear, location: 1.0)
                         ],
                         startPoint: .topLeading,
@@ -697,6 +756,12 @@ extension View {
 
     func heroCard(color: Color = DS.Colors.violet) -> some View {
         modifier(HeroCard(color: color))
+    }
+
+    /// Status-tinted glass card (wake coach, smart alarm, last-night). Caller
+    /// supplies its own content padding before this modifier.
+    func accentGlassCard(tint: Color, active: Bool = true) -> some View {
+        modifier(AccentGlassCard(tint: tint, active: active))
     }
 }
 

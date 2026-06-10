@@ -98,7 +98,7 @@ struct BarcodeScannerSheet: View {
                             .font(DS.Font.body)
                             .foregroundStyle(DS.Colors.textSecondary)
                             .multilineTextAlignment(.center)
-                        Button("Erneut versuchen") {
+                        Button("Try again") {
                             lookupError = nil; scannedCode = nil
                         }
                         .foregroundStyle(DS.Colors.violet)
