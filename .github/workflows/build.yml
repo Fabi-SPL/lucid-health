@@ -30,8 +30,9 @@ jobs:
         run: |
           sed -i '' 's/private let apiKey: String = "local-dev"/private let apiKey: String = "${{ secrets.GOOGLE_AI_API_KEY }}"/' \
             ios/LucidHealth/LucidHealth/Services/GeminiClient.swift
-          echo "=== GeminiClient apiKey line after injection ==="
-          grep 'apiKey' ios/LucidHealth/LucidHealth/Services/GeminiClient.swift | head -3
+          echo "=== GeminiClient apiKey after injection (value masked) ==="
+          grep 'apiKey' ios/LucidHealth/LucidHealth/Services/GeminiClient.swift | \
+            sed 's/= ".*"/= "***"/' | head -3
 
       - name: Inject auth credentials + Supabase config
         run: |

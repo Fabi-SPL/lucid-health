@@ -390,6 +390,15 @@ struct ManualFoodEntrySheet: View {
         isSaving = true
         error = nil
         Task {
+            // Auto-fill on Save if the user typed and saved without estimating.
+            // Uses the FREE server-side estimate (no Gemini quota) so a meal
+            // never lands as 0 kcal / 0 items. Best-effort: never blocks saving.
+            if geminiResult == nil && estimate == nil {
+                if let est = await supabase.estimateMealFromText(description), est.recognized {
+                    estimate = est
+                    if !est.items.isEmpty { items = est.items }
+                }
+            }
             do {
                 let result = geminiResult
                 // Source: "text" when saved off the instant estimate, "manual" otherwise.
