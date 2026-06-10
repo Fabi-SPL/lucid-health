@@ -119,8 +119,7 @@ struct HealthView: View {
     private var quickActionsRow: some View {
         HStack(spacing: DS.Spacing.sm) {
             Button {
-                let h = UIImpactFeedbackGenerator(style: .light)
-                h.impactOccurred()
+                DS.Haptic.tap()
                 showTimeline = true
             } label: {
                 Label("Timeline", systemImage: "clock.arrow.circlepath")
@@ -143,8 +142,7 @@ struct HealthView: View {
             // chronic-low baseline keeps HR-driven wake detection from firing.
             if canManualWake {
                 Button {
-                    let h = UINotificationFeedbackGenerator()
-                    h.notificationOccurred(.success)
+                    DS.Haptic.success()
                     engine.manualWakeUp()
                 } label: {
                     Label("I'm awake", systemImage: "sun.max.fill")
@@ -163,8 +161,7 @@ struct HealthView: View {
             }
 
             Button {
-                let h = UIImpactFeedbackGenerator(style: .light)
-                h.impactOccurred()
+                DS.Haptic.tap()
                 showSleepAdjust = true
             } label: {
                 Label("Adjust sleep", systemImage: "moon.zzz.fill")
