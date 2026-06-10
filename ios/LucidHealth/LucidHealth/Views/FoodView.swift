@@ -13,6 +13,7 @@ struct FoodView: View {
     @State private var filter: FoodFilter = .all
     @State private var showCamera = false
     @State private var showBarcode = false
+    @State private var showManual = false
     @State private var showFABMenu = false
     @State private var appeared = false
     @State private var saveSuccessCount = 0
@@ -126,7 +127,7 @@ struct FoodView: View {
                     } onBarcode: {
                         showBarcode = true
                     } onManual: {
-                        // Manual entry sheet — future
+                        showManual = true
                     }
                     .padding(.trailing, DS.Spacing.lg)
                 }
@@ -152,6 +153,11 @@ struct FoodView: View {
         }
         .fullScreenCover(isPresented: $showBarcode) {
             BarcodeScannerView { entry in
+                entries.insert(entry, at: 0)
+            }
+        }
+        .fullScreenCover(isPresented: $showManual) {
+            ManualFoodEntrySheet { entry in
                 entries.insert(entry, at: 0)
             }
         }
@@ -346,6 +352,7 @@ private struct FilterChipRow: View {
             HStack(spacing: DS.Spacing.sm) {
                 ForEach(FoodFilter.allCases, id: \.self) { f in
                     Button {
+                        DS.Haptic.select()
                         withAnimation(DS.Anim.quick) { selected = f }
                     } label: {
                         Text(f.rawValue)
