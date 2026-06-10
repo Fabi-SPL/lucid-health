@@ -3,6 +3,7 @@ import SwiftUI
 /// Compact BLE connection indicator — pulsing dot with label.
 struct BLEStatusDot: View {
     @EnvironmentObject private var bleManager: BLEManager
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     private var color: Color {
         switch bleManager.connectionState {
@@ -15,12 +16,12 @@ struct BLEStatusDot: View {
 
     private var label: String {
         switch bleManager.connectionState {
-        case .connected:    return "Verbunden"
+        case .connected:    return "Connected"
         case .streaming:    return "Live"
         case .syncing:      return "Syncing…"
-        case .scanning:     return "Suche…"
-        case .connecting:   return "Verbinde…"
-        case .disconnected: return "Getrennt"
+        case .scanning:     return "Searching…"
+        case .connecting:   return "Connecting…"
+        case .disconnected: return "Disconnected"
         }
     }
 
@@ -36,7 +37,7 @@ struct BLEStatusDot: View {
     var body: some View {
         HStack(spacing: 5) {
             ZStack {
-                if isPulsing {
+                if isPulsing && !reduceMotion {
                     Circle()
                         .fill(color.opacity(0.3))
                         .frame(width: 12, height: 12)

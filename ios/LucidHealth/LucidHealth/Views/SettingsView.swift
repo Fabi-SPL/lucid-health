@@ -17,136 +17,46 @@ struct SettingsView: View {
             LazyVStack(spacing: DS.Spacing.md) {
                 headerSpacer
 
-                // Auth status with AmbientLiveDot
-                AuthStatusCard()
-                    .offset(y: appeared ? 0 : 20)
-                    .opacity(appeared ? 1 : 0)
-                    .animation(DS.Anim.stagger(index: 0), value: appeared)
+                // ── CORE ─────────────────────────────────────────────
+                groupHeader("ACCOUNT & DEVICE", icon: "person.crop.circle", index: 0)
 
-                // Personalization — weight (BMR/TDEE/BAC inputs)
-                PersonalizationCard()
-                    .offset(y: appeared ? 0 : 20)
-                    .opacity(appeared ? 1 : 0)
-                    .animation(DS.Anim.stagger(index: 1), value: appeared)
+                staggered(1) { AuthStatusCard() }
+                staggered(2) { PersonalizationCard() }
+                staggered(3) { BLEControlCard(bleManager: bleManager) }
+                staggered(4) { AppInfoCard() }
+                staggered(5) { DisplayCard() }
 
-                // BLE control with full-width pill reconnect
-                BLEControlCard(bleManager: bleManager)
-                    .offset(y: appeared ? 0 : 20)
-                    .opacity(appeared ? 1 : 0)
-                    .animation(DS.Anim.stagger(index: 1), value: appeared)
+                // ── EXPERIMENTAL ─────────────────────────────────────
+                // Whoop-pattern experiments — opt-in, may break, that's the point.
+                groupHeader("EXPERIMENTAL · LABS", icon: "flask.fill", index: 6, tint: DS.Colors.violet)
 
-                // App info
-                AppInfoCard()
-                    .offset(y: appeared ? 0 : 20)
-                    .opacity(appeared ? 1 : 0)
-                    .animation(DS.Anim.stagger(index: 2), value: appeared)
+                staggered(7) { DiscordBroadcastCard() }
+                staggered(8) { HighFrequencyBroadcastCard() }
+                staggered(9) { SpiralAlertsLogCard() }
+                staggered(10) { HueMirrorCard() }
 
-                // Display — recovery ring style picker (v103)
-                DisplayCard()
-                    .offset(y: appeared ? 0 : 20)
-                    .opacity(appeared ? 1 : 0)
-                    .animation(DS.Anim.stagger(index: 2), value: appeared)
+                // ── DIAGNOSTICS ──────────────────────────────────────
+                // Strap/data plumbing + dev tools. NOT experimental features —
+                // these are the "is the hardware working" instruments.
+                groupHeader("DIAGNOSTICS", icon: "stethoscope", index: 11, tint: DS.Colors.teal)
 
-                // Credential override (dev/admin)
-                CredentialOverrideCard(
-                    isExpanded: $showCredentialOverride,
-                    email: $overrideEmail,
-                    password: $overridePassword,
-                    isSaving: isSavingCredentials,
-                    saved: credentialSaved
-                ) {
-                    await saveCredentials()
+                staggered(12) {
+                    CredentialOverrideCard(
+                        isExpanded: $showCredentialOverride,
+                        email: $overrideEmail,
+                        password: $overridePassword,
+                        isSaving: isSavingCredentials,
+                        saved: credentialSaved
+                    ) { await saveCredentials() }
                 }
-                .offset(y: appeared ? 0 : 20)
-                .opacity(appeared ? 1 : 0)
-                .animation(DS.Anim.stagger(index: 3), value: appeared)
-
-                // BLE diagnostics
-                BLEDiagnosticsCard(bleManager: bleManager)
-                    .offset(y: appeared ? 0 : 20)
-                    .opacity(appeared ? 1 : 0)
-                    .animation(DS.Anim.stagger(index: 4), value: appeared)
-
-                // Data sync status
-                DataSyncCard(bleManager: bleManager)
-                    .offset(y: appeared ? 0 : 20)
-                    .opacity(appeared ? 1 : 0)
-                    .animation(DS.Anim.stagger(index: 5), value: appeared)
-
-                // Manual 72h backfill — recover overnight gaps from strap buffer
-                ManualBackfillCard(bleManager: bleManager)
-                    .offset(y: appeared ? 0 : 20)
-                    .opacity(appeared ? 1 : 0)
-                    .animation(DS.Anim.stagger(index: 6), value: appeared)
-
-                // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-                // Experimental Whoop-pattern features (May 2026)
-                // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-                Text("EXPERIMENTAL")
-                    .font(.system(size: 10, weight: .bold, design: .monospaced))
-                    .foregroundStyle(DS.Colors.violet)
-                    .tracking(1.5)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(.horizontal, DS.Spacing.sm)
-                    .padding(.top, DS.Spacing.md)
-                    .opacity(appeared ? 1 : 0)
-                    .animation(DS.Anim.stagger(index: 6), value: appeared)
-
-                DiscordBroadcastCard()
-                    .offset(y: appeared ? 0 : 20)
-                    .opacity(appeared ? 1 : 0)
-                    .animation(DS.Anim.stagger(index: 7), value: appeared)
-
-                HighFrequencyBroadcastCard()
-                    .offset(y: appeared ? 0 : 20)
-                    .opacity(appeared ? 1 : 0)
-                    .animation(DS.Anim.stagger(index: 8), value: appeared)
-
-                SpiralAlertsLogCard()
-                    .offset(y: appeared ? 0 : 20)
-                    .opacity(appeared ? 1 : 0)
-                    .animation(DS.Anim.stagger(index: 8), value: appeared)
-
-                HueMirrorCard()
-                    .offset(y: appeared ? 0 : 20)
-                    .opacity(appeared ? 1 : 0)
-                    .animation(DS.Anim.stagger(index: 9), value: appeared)
-
-                // Dev section
-                DevCard()
-                    .offset(y: appeared ? 0 : 20)
-                    .opacity(appeared ? 1 : 0)
-                    .animation(DS.Anim.stagger(index: 10), value: appeared)
-
-                // Skin temp diagnostic — surface what's actually arriving from
-                // the strap, so we can tell if it's "no events" vs "bad decode".
-                SkinTempDiagnosticsCard(bleManager: bleManager)
-                    .offset(y: appeared ? 0 : 20)
-                    .opacity(appeared ? 1 : 0)
-                    .animation(DS.Anim.stagger(index: 11), value: appeared)
-
-                // All-streams diagnostic — packet count per type per session.
-                // Shows whether power-user mode (cmd 106/107/81) actually
-                // unlocked IMU + raw PPG streams or got silently rejected.
-                AllStreamsDiagnosticsCard(bleManager: bleManager)
-                    .offset(y: appeared ? 0 : 20)
-                    .opacity(appeared ? 1 : 0)
-                    .animation(DS.Anim.stagger(index: 11), value: appeared)
-
-                // Battery diagnostics — current level + drain rate so Fabi can
-                // see how much always-on streaming is costing.
-                BatteryDiagnosticsCard(bleManager: bleManager)
-                    .offset(y: appeared ? 0 : 20)
-                    .opacity(appeared ? 1 : 0)
-                    .animation(DS.Anim.stagger(index: 11), value: appeared)
-
-                // On-phone log viewer — replaces Mac/Console.app for users
-                // without a Mac. Reads the shared LucidLog file.
-                LogViewerCard { showLogs = true }
-                    .offset(y: appeared ? 0 : 20)
-                    .opacity(appeared ? 1 : 0)
-                    .animation(DS.Anim.stagger(index: 12), value: appeared)
+                staggered(13) { BLEDiagnosticsCard(bleManager: bleManager) }
+                staggered(14) { DataSyncCard(bleManager: bleManager) }
+                staggered(15) { ManualBackfillCard(bleManager: bleManager) }
+                staggered(16) { DevCard() }
+                staggered(17) { SkinTempDiagnosticsCard(bleManager: bleManager) }
+                staggered(18) { AllStreamsDiagnosticsCard(bleManager: bleManager) }
+                staggered(19) { BatteryDiagnosticsCard(bleManager: bleManager) }
+                staggered(20) { LogViewerCard { showLogs = true } }
 
                 bottomSpacer
             }
@@ -163,6 +73,38 @@ struct SettingsView: View {
 
     private var headerSpacer: some View { Color.clear.frame(height: DS.Spacing.sm) }
     private var bottomSpacer: some View { Color.clear.frame(height: 100) }
+
+    /// One entrance choreography for every Settings card — sequential index,
+    /// no more hand-numbered duplicates. (DS.Anim.stagger caps at 8 so the long
+    /// diagnostics tail settles together instead of dragging in late.)
+    @ViewBuilder
+    private func staggered<Content: View>(_ index: Int, @ViewBuilder _ content: () -> Content) -> some View {
+        content()
+            .offset(y: appeared ? 0 : 20)
+            .opacity(appeared ? 1 : 0)
+            .animation(DS.Anim.stagger(index: index), value: appeared)
+    }
+
+    /// Consistent group divider label so Settings reads as CORE / LABS /
+    /// DIAGNOSTICS sections instead of one undifferentiated dump.
+    private func groupHeader(_ title: String, icon: String, index: Int, tint: Color = DS.Colors.textMuted) -> some View {
+        HStack(spacing: 7) {
+            Image(systemName: icon)
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundStyle(tint)
+            Text(title)
+                .font(.system(size: 11, weight: .bold, design: .rounded))
+                .foregroundStyle(tint)
+                .tracking(1.2)
+            Spacer()
+        }
+        .padding(.horizontal, DS.Spacing.sm)
+        .padding(.top, DS.Spacing.lg)
+        .padding(.bottom, 2)
+        .offset(y: appeared ? 0 : 20)
+        .opacity(appeared ? 1 : 0)
+        .animation(DS.Anim.stagger(index: index), value: appeared)
+    }
 
     private func saveCredentials() async {
         guard !overrideEmail.isEmpty, !overridePassword.isEmpty else { return }
@@ -856,24 +798,6 @@ private struct DataSyncCard: View {
                 }
 
                 Spacer()
-
-                // Export placeholder
-                Button {} label: {
-                    Label("Export", systemImage: "square.and.arrow.up")
-                        .font(.system(size: 11, weight: .medium))
-                        .foregroundStyle(DS.Colors.textFaint)
-                        .padding(.horizontal, DS.Spacing.sm)
-                        .padding(.vertical, 5)
-                        .background(
-                            RoundedRectangle(cornerRadius: DS.Radius.sm)
-                                .fill(DS.Colors.surfaceElevated)
-                                .overlay(RoundedRectangle(cornerRadius: DS.Radius.sm)
-                                    .stroke(DS.Colors.border, lineWidth: 0.5))
-                        )
-                }
-                .buttonStyle(.plain)
-                .disabled(true)
-                .opacity(0.5)
             }
         }
         .padding(DS.Spacing.lg)

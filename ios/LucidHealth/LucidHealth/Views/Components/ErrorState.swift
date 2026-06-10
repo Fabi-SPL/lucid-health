@@ -15,7 +15,7 @@ struct ErrorState: View {
                 .foregroundStyle(DS.Colors.textSecondary)
                 .multilineTextAlignment(.center)
             if let retry = onRetry {
-                Button("Erneut versuchen", action: retry)
+                Button("Try again", action: retry)
                     .font(.system(size: 13, weight: .semibold))
                     .foregroundStyle(DS.Colors.violet)
             }
