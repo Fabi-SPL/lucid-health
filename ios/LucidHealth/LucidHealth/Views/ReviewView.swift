@@ -176,6 +176,18 @@ struct ReviewView: View {
         isSaving = true
         error = nil
         Task {
+            // Auto-enrich on Save if the user never tapped Analyze.
+            // Best-effort: swallow any failure (429 / outage / dead key) so a
+            // Gemini problem can NEVER block logging the meal. Was: Save read a
+            // nil geminiResult and silently wrote 0 kcal / 0 items.
+            if geminiResult == nil {
+                if let r = try? await gemini.analyzeFood(image: image, caption: caption.isEmpty ? nil : caption) {
+                    geminiResult = r
+                    items = r.items
+                    hasAnalyzed = true
+                }
+            }
+
             // Track which step failed so the error message can be precise.
             // Previously a generic "403" with no context made debugging painful.
             var step = "preparing image"
