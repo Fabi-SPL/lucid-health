@@ -72,7 +72,7 @@ struct SwipeActionsCard<Content: View>: View {
 
                             let predicted = baseOffset + value.predictedEndTranslation.width
                             let final = baseOffset + value.translation.width
-                            withAnimation(.spring(response: 0.34, dampingFraction: 0.85)) {
+                            withAnimation(DS.Anim.standard) {
                                 if predicted < -snapPoint || final < -snapPoint {
                                     offset = -totalWidth
                                 } else {
@@ -91,15 +91,14 @@ struct SwipeActionsCard<Content: View>: View {
     }
 
     private func close() {
-        withAnimation(.spring(response: 0.32, dampingFraction: 0.9)) {
+        withAnimation(DS.Anim.standard) {
             offset = 0
         }
     }
 
     private func actionButton(icon: String, label: String, color: Color, action: @escaping () -> Void) -> some View {
         Button {
-            let h = UIImpactFeedbackGenerator(style: .medium)
-            h.impactOccurred()
+            DS.Haptic.commit()
             action()
         } label: {
             VStack(spacing: 4) {
