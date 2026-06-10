@@ -1087,4 +1087,15 @@ struct PressableCardStyle: ButtonStyle {
 extension View {
     /// Apply tactile press feedback to a card-shaped Button.
     func pressableCard() -> some View { buttonStyle(PressableCardStyle()) }
+
+    /// Canonical card entrance — rise + fade, staggered by index. One source of
+    /// truth for the offset(20)/opacity/stagger pattern that was hand-copied
+    /// across every screen (often with duplicated indices). Drive it from a
+    /// single `appeared` flag set in the view's .task/.onAppear.
+    func entrance(_ appeared: Bool, index: Int) -> some View {
+        self
+            .opacity(appeared ? 1 : 0)
+            .offset(y: appeared ? 0 : 20)
+            .animation(DS.Anim.stagger(index: index), value: appeared)
+    }
 }
