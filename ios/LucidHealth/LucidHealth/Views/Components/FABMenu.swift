@@ -39,8 +39,7 @@ struct FABMenuItem: View {
 
     var body: some View {
         Button(action: {
-            let haptic = UIImpactFeedbackGenerator(style: .light)
-            haptic.impactOccurred()
+            DS.Haptic.tap()
             action()
         }) {
             HStack(spacing: DS.Spacing.sm) {

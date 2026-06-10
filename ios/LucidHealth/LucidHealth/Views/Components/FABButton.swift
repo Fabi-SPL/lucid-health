@@ -8,8 +8,7 @@ struct FABButton: View {
 
     var body: some View {
         Button {
-            let haptic = UIImpactFeedbackGenerator(style: .medium)
-            haptic.impactOccurred()
+            DS.Haptic.commit()
             withAnimation(DS.Anim.standard) { isOpen.toggle() }
         } label: {
             ZStack {
