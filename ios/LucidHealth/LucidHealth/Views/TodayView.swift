@@ -28,6 +28,7 @@ struct TodayView: View {
     @State private var appeared = false
     @State private var hasLoaded = false
     @State private var recoveryTrend: [Double] = []
+    @State private var bbTrend: [BodyBatteryPoint] = []
     @State private var saveSuccessCount = 0
     @State private var saveErrorCount = 0
     @StateObject private var modeStore = AppModeStore()
@@ -240,6 +241,9 @@ struct TodayView: View {
                     if let bb = await bleManager.supabase.fetchBodyBatteryAnchor() {
                         await MainActor.run { bleManager.healthEngine.bodyBattery = bb }
                     }
+                    // 24h body-battery curve for the hero chart (smooth, server-built)
+                    let series = await bleManager.supabase.fetchBodyBatterySeries()
+                    await MainActor.run { bbTrend = series }
                 }
                 Task { await bleManager.syncTonightPlan() }
             }
@@ -523,7 +527,8 @@ struct TodayView: View {
                 level: engine.bodyBattery,
                 recovery: engine.recoveryScore,
                 sleepHours: engine.sleepDurationHours,
-                strain: engine.strainScore
+                strain: engine.strainScore,
+                trend: bbTrend
             )
                 .statusGlow(DS.Colors.bodyBatteryColor(engine.bodyBattery), intensity: 0.7)
                 .padding(.top, DS.Spacing.sm)
@@ -1010,18 +1015,7 @@ private struct WakeCoachCard: View {
         }
         .padding(DS.Spacing.md)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(
-            RoundedRectangle(cornerRadius: 22, style: .continuous)
-                .fill(.ultraThinMaterial)
-                .overlay(
-                    RoundedRectangle(cornerRadius: 22, style: .continuous)
-                        .fill(accent.opacity(0.06))
-                )
-                .overlay(
-                    RoundedRectangle(cornerRadius: 22, style: .continuous)
-                        .stroke(Color.white.opacity(0.12), lineWidth: 0.5)
-                )
-        )
+        .accentGlassCard(tint: accent)
     }
 
     @ViewBuilder
@@ -1339,14 +1333,7 @@ private struct SmartAlarmCard: View {
             }
         }
         .padding(DS.Spacing.md)
-        .background(
-            RoundedRectangle(cornerRadius: 22, style: .continuous)
-                .fill(DS.Colors.surface)
-                .overlay(
-                    RoundedRectangle(cornerRadius: 22, style: .continuous)
-                        .stroke(DS.Colors.violet.opacity(enabled ? 0.30 : 0.12), lineWidth: 0.5)
-                )
-        )
+        .accentGlassCard(tint: DS.Colors.violet, active: enabled)
     }
 
     private func formatTime(_ mins: Int) -> String {
