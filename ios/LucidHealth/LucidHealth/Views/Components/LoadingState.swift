@@ -2,7 +2,7 @@ import SwiftUI
 
 /// Reusable loading placeholder — spinning ring + label.
 struct LoadingState: View {
-    var label: String = "Lädt…"
+    var label: String = "Loading…"
 
     var body: some View {
         VStack(spacing: DS.Spacing.md) {

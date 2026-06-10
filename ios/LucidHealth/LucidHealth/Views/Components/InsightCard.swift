@@ -14,9 +14,9 @@ struct InsightCard: View {
 
     private var tierLabel: String {
         switch pattern.confidenceTier {
-        case .high:   return "Hohes Vertrauen"
-        case .medium: return "Mittleres Vertrauen"
-        case .low:    return "Frühe Daten"
+        case .high:   return "High confidence"
+        case .medium: return "Emerging"
+        case .low:    return "Early data"
         }
     }
 

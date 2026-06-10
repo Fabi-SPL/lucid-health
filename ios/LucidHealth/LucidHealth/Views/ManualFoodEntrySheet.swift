@@ -336,6 +336,7 @@ struct ManualFoodEntrySheet: View {
     // MARK: - Actions
 
     private func quickEstimate() {
+        DS.Haptic.tap()
         descriptionFocused = false
         isEstimating = true
         error = nil
@@ -348,6 +349,8 @@ struct ManualFoodEntrySheet: View {
                 }
                 if !est.recognized {
                     error = "Didn't recognise that one. Type a common food, or use deep analysis."
+                } else {
+                    DS.Haptic.tap()
                 }
             } else {
                 error = "Estimate failed. Try deep analysis instead."
@@ -357,6 +360,7 @@ struct ManualFoodEntrySheet: View {
     }
 
     private func analyze() {
+        DS.Haptic.tap()
         descriptionFocused = false
         isAnalyzing = true
         error = nil
@@ -382,6 +386,7 @@ struct ManualFoodEntrySheet: View {
     }
 
     private func saveEntry() {
+        DS.Haptic.commit()
         isSaving = true
         error = nil
         Task {
@@ -406,9 +411,11 @@ struct ManualFoodEntrySheet: View {
                 )
 
                 let saved = try await supabase.saveFoodEntry(entry)
+                DS.Haptic.success()
                 onSaved?(saved)
                 dismiss()
             } catch {
+                DS.Haptic.error()
                 self.error = error.localizedDescription
             }
             isSaving = false
