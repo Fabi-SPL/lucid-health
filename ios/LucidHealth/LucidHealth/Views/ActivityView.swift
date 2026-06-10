@@ -25,6 +25,7 @@ struct ActivityView: View {
     @State private var showBacktrackCreate = false
     @State private var deletingId: String?
     @State private var customActivityName = ""
+    @State private var appeared = false
 
     init(ble: BLEManager) {
         self.ble = ble
@@ -35,22 +36,29 @@ struct ActivityView: View {
         ScrollView(showsIndicators: false) {
             LazyVStack(spacing: DS.Spacing.lg, pinnedViews: []) {
                 heroHeader
+                    .entrance(appeared, index: 0)
 
                 if let manual = ble.manualActivityType, let start = ble.manualActivityStart {
                     activeSessionRow(type: manual, start: start)
                         .padding(.horizontal, DS.Spacing.md)
+                        .entrance(appeared, index: 1)
                 }
 
                 feedSection
+                    .entrance(appeared, index: 2)
 
                 quickAddSection
+                    .entrance(appeared, index: 3)
 
                 Color.clear.frame(height: DS.Spacing.xl)
             }
             .padding(.top, DS.Spacing.xs)
         }
         .background(MeshGradientBackground().ignoresSafeArea())
-        .task { await refresh() }
+        .task {
+            await refresh()
+            withAnimation(DS.Anim.cardAppear) { appeared = true }
+        }
         .refreshable { await refresh() }
         .sheet(item: $editingActivity) { activity in
             ActivityEditSheet(
@@ -156,6 +164,7 @@ struct ActivityView: View {
             Spacer()
 
             Button {
+                DS.Haptic.commit()
                 ble.endManualActivity()
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) {
                     Task { await refresh() }
@@ -171,14 +180,7 @@ struct ActivityView: View {
             .buttonStyle(.plain)
         }
         .padding(DS.Spacing.md)
-        .background(
-            RoundedRectangle(cornerRadius: 22, style: .continuous)
-                .fill(DS.Colors.violet.opacity(0.10))
-                .overlay(
-                    RoundedRectangle(cornerRadius: 22, style: .continuous)
-                        .stroke(DS.Colors.violet.opacity(0.25), lineWidth: 0.5)
-                )
-        )
+        .accentGlassCard(tint: DS.Colors.violet)
     }
 
     // MARK: - Feed
