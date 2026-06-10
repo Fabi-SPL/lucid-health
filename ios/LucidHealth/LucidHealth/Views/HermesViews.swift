@@ -155,7 +155,7 @@ struct HermesCard: View {
                         .foregroundStyle(DS.Colors.textFaint)
                 }
                 Spacer()
-                Button(action: { showingStats = true }) {
+                Button(action: { DS.Haptic.tap(); showingStats = true }) {
                     Image(systemName: "chart.line.uptrend.xyaxis")
                         .font(.system(size: 12, weight: .bold))
                         .foregroundStyle(DS.Colors.textSecondary)
@@ -164,7 +164,7 @@ struct HermesCard: View {
                         .clipShape(Circle())
                 }
                 .buttonStyle(.plain)
-                Button(action: { Task { await refresh() } }) {
+                Button(action: { DS.Haptic.tap(); Task { await refresh() } }) {
                     Image(systemName: isLoading ? "ellipsis" : "arrow.clockwise")
                         .font(.system(size: 12, weight: .bold))
                         .foregroundStyle(DS.Colors.textSecondary)
@@ -193,7 +193,7 @@ struct HermesCard: View {
             }
 
             // Ask Hermes button
-            Button(action: { showingChat = true }) {
+            Button(action: { DS.Haptic.tap(); showingChat = true }) {
                 HStack(spacing: DS.Spacing.xs) {
                     Image(systemName: "bubble.left.and.text.bubble.right.fill")
                         .font(.system(size: 12, weight: .bold))
@@ -443,9 +443,11 @@ struct HermesChatSheet: View {
         let trimmed = input.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty, !isSending else { return }
         guard let token = HermesAPI.bearerToken(from: bleManager.supabase) else {
+            DS.Haptic.error()
             error = "Sign in to use Hermes"
             return
         }
+        DS.Haptic.commit()
         let userMsg = HermesChatMessage(role: "user", content: trimmed)
         await MainActor.run {
             messages.append(userMsg)
@@ -462,12 +464,14 @@ struct HermesChatSheet: View {
             )
             let assistantMsg = HermesChatMessage(role: "assistant", content: reply.reply)
             await MainActor.run {
+                DS.Haptic.tap()   // reply landed
                 messages.append(assistantMsg)
                 isSending = false
             }
             persist()
         } catch let e {
             await MainActor.run {
+                DS.Haptic.error()
                 error = (e as NSError).localizedDescription
                 isSending = false
             }
@@ -532,6 +536,7 @@ private struct MessageBubble: View {
 
 private struct TypingDots: View {
     @State private var phase: Int = 0
+    @State private var timer: Timer?
     var body: some View {
         HStack(spacing: 4) {
             ForEach(0..<3, id: \.self) { i in
@@ -545,9 +550,16 @@ private struct TypingDots: View {
         }
         .frame(height: 14)
         .onAppear {
-            Timer.scheduledTimer(withTimeInterval: 0.42, repeats: true) { _ in
+            // Invalidate any prior timer first — onAppear can fire repeatedly,
+            // and the old code leaked a new repeating Timer every time.
+            timer?.invalidate()
+            timer = Timer.scheduledTimer(withTimeInterval: 0.42, repeats: true) { _ in
                 phase = (phase + 1) % 3
             }
+        }
+        .onDisappear {
+            timer?.invalidate()
+            timer = nil
         }
     }
 }
