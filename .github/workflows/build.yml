@@ -26,13 +26,9 @@ jobs:
           echo "Available SDKs:"
           xcodebuild -showsdks | grep iphoneos || echo "No iphoneos SDK found"
 
-      - name: Inject Gemini API key
-        run: |
-          sed -i '' 's/private let apiKey: String = "local-dev"/private let apiKey: String = "${{ secrets.GOOGLE_AI_API_KEY }}"/' \
-            ios/LucidHealth/LucidHealth/Services/GeminiClient.swift
-          echo "=== GeminiClient apiKey after injection (value masked) ==="
-          grep 'apiKey' ios/LucidHealth/LucidHealth/Services/GeminiClient.swift | \
-            sed 's/= ".*"/= "***"/' | head -3
+      # Gemini key is NOT injected anymore — food analysis is proxied through the
+      # server (analyze_food_photo / analyze_food_text RPCs), key lives in Supabase
+      # Vault. Nothing secret ships in the public IPA. (Old inject+echo step removed.)
 
       - name: Inject auth credentials + Supabase config
         run: |
