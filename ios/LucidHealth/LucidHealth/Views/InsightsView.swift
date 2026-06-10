@@ -13,6 +13,8 @@ struct InsightsView: View {
     @State private var appeared = false
     @State private var confidenceFilter: FoodPattern.ConfidenceTier? = nil  // All — show strongest real patterns first
     @State private var showCoherenceDrill = false
+    @State private var lastNight: SleepRestlessness? = nil
+    @State private var illness: IllnessRisk? = nil
 
     private static let minimumEntries = 14
 
@@ -39,6 +41,13 @@ struct InsightsView: View {
                         .offset(y: appeared ? 0 : 20)
                         .opacity(appeared ? 1 : 0)
                         .animation(DS.Anim.stagger(index: 1), value: appeared)
+
+                    // Last-night signals (sleep restlessness + illness early-warning)
+                    LastNightCard(sleep: lastNight, illness: illness)
+                        .padding(.horizontal, DS.Spacing.md)
+                        .offset(y: appeared ? 0 : 20)
+                        .opacity(appeared ? 1 : 0)
+                        .animation(DS.Anim.stagger(index: 2), value: appeared)
 
                     if isLoading {
                         LoadingState(label: "Analyzing patterns…")
@@ -179,6 +188,82 @@ struct InsightsView: View {
         entryCount = entries.count
         patterns = InsightEngine.compute(entries: entries, metrics: metrics)
         isLoading = false
+        // Last-night signals load independently (don't gate the patterns view on them).
+        lastNight = await SupabaseClient.shared.fetchSleepRestlessness()
+        illness = await SupabaseClient.shared.fetchIllnessRisk()
+    }
+}
+
+// MARK: - Last Night Card (sleep restlessness + illness early-warning)
+
+private struct LastNightCard: View {
+    let sleep: SleepRestlessness?
+    let illness: IllnessRisk?
+
+    var body: some View {
+        if let s = sleep {
+            VStack(alignment: .leading, spacing: DS.Spacing.sm) {
+                HStack {
+                    Text("LAST NIGHT")
+                        .font(DS.Font.label)
+                        .foregroundStyle(DS.Colors.textMuted)
+                        .tracking(0.8)
+                    Spacer()
+                    Text(String(format: "%.1fh in bed", s.inBedH))
+                        .font(.system(size: 11, weight: .medium))
+                        .foregroundStyle(DS.Colors.textFaint)
+                        .monospacedDigit()
+                }
+                HStack(spacing: DS.Spacing.md) {
+                    metric(value: "\(s.stability)/10", label: "stability", color: stabilityColor(s.stability))
+                    metric(value: "\(s.restlessMin)m", label: "restless", color: DS.Colors.textSecondary)
+                    metric(value: "\(s.wakeups)", label: "wake-ups", color: DS.Colors.textSecondary)
+                    metric(value: "\(s.sleepingHr)", label: "sleep HR", color: DS.Colors.teal)
+                }
+                if let ill = illness, ill.isSignal {
+                    HStack(alignment: .top, spacing: 6) {
+                        Circle()
+                            .fill(illnessColor(ill.level))
+                            .frame(width: 7, height: 7)
+                            .padding(.top, 4)
+                        Text(ill.note)
+                            .font(.system(size: 11, weight: .regular))
+                            .foregroundStyle(DS.Colors.textSecondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                    .padding(.top, 2)
+                }
+            }
+            .padding(DS.Spacing.md)
+            .glassDefault()
+        }
+    }
+
+    private func metric(value: String, label: String, color: Color) -> some View {
+        VStack(spacing: 2) {
+            Text(value)
+                .font(.system(size: 16, weight: .bold, design: .rounded))
+                .foregroundStyle(color)
+                .monospacedDigit()
+            Text(label)
+                .font(.system(size: 9, weight: .medium))
+                .foregroundStyle(DS.Colors.textFaint)
+        }
+        .frame(maxWidth: .infinity)
+    }
+
+    private func stabilityColor(_ s: Int) -> Color {
+        if s >= 7 { return DS.Colors.teal }
+        if s >= 4 { return DS.Colors.amber }
+        return DS.Colors.danger
+    }
+
+    private func illnessColor(_ level: String) -> Color {
+        switch level {
+        case "elevated": return DS.Colors.danger
+        case "watch":    return DS.Colors.amber
+        default:         return DS.Colors.teal
+        }
     }
 }
 

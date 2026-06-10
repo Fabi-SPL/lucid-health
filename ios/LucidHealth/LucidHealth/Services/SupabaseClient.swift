@@ -33,6 +33,44 @@ struct BackToSleepPlan {
     var shouldGoBack: Bool { verdict == "go_back" }
 }
 
+/// Server `estimate_meal_from_text` — zero-cost carb/glycemic estimate from a
+/// typed meal ("I ate lasagna"), no Gemini, no photo. Relative meal-impact proxy.
+struct MealEstimate {
+    let netCarbsG: Int
+    let kcal: Int
+    let glycemicLoad: Int
+    let giBand: String        // high | medium | low
+    let isAlcohol: Bool
+    let confidence: String    // estimate | low | none
+    let note: String
+    let items: [DetectedItem]
+    var recognized: Bool { confidence != "none" }
+}
+
+/// Server `sleep_restlessness` — MEASURED HR-spike arousals + autonomic
+/// stability (real), plus a labeled-experimental dream estimate.
+struct SleepRestlessness {
+    let date: String
+    let inBedH: Double
+    let sleepingHr: Int
+    let restlessMin: Int
+    let wakeups: Int
+    let stability: Int        // 0-10
+    let dreamPeriodsEst: Int
+    let note: String
+}
+
+/// Server `illness_risk_now` — RHR-up + HRV-down vs 30d baseline, alcohol-
+/// excluded, 2-night sustain gate. level: clear | watch | elevated | no_data.
+struct IllnessRisk {
+    let level: String
+    let risk: Int
+    let note: String
+    let rhr: Double?
+    let hrv: Double?
+    var isSignal: Bool { level == "watch" || level == "elevated" }
+}
+
 class SupabaseClient {
 
     // Singleton — shared by app + BLEManager + Foods views
@@ -587,6 +625,129 @@ class SupabaseClient {
         let plain = ISO8601DateFormatter()
         plain.formatOptions = [.withInternetDateTime]
         return withFrac.date(from: iso) ?? plain.date(from: iso)
+    }
+
+    // MARK: - Meal-glucose proxy (text → carbs → post-prandial HR)
+
+    /// Zero-cost server estimate for a typed meal. Returns nil on failure so the
+    /// sheet falls back to Gemini / manual. No quota, instant, no photo.
+    func estimateMealFromText(_ text: String) async -> MealEstimate? {
+        do {
+            try await ensureAuth()
+            guard let token = accessToken else { return nil }
+            let body: [String: Any] = ["p_text": text]
+            let url = URL(string: "\(baseURL)/rest/v1/rpc/estimate_meal_from_text")!
+            var req = URLRequest(url: url)
+            req.httpMethod = "POST"
+            req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+            req.setValue(anonKey, forHTTPHeaderField: "apikey")
+            req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+            req.httpBody = try JSONSerialization.data(withJSONObject: body)
+            let (data, resp) = try await session.data(for: req)
+            let code = (resp as? HTTPURLResponse)?.statusCode ?? 0
+            guard code < 300 else { log("estimate_meal_from_text HTTP \(code)"); return nil }
+            let obj: [String: Any]?
+            if let arr = try JSONSerialization.jsonObject(with: data) as? [[String: Any]] { obj = arr.first }
+            else { obj = try JSONSerialization.jsonObject(with: data) as? [String: Any] }
+            guard let p = obj else { return nil }
+            let rawItems = (p["items"] as? [[String: Any]]) ?? []
+            let items: [DetectedItem] = rawItems.map { it in
+                DetectedItem(
+                    name: (it["name"] as? String) ?? "Food",
+                    grams: 0,
+                    kcal: (it["kcal"] as? NSNumber)?.intValue ?? 0,
+                    carbsG: (it["net_carbs_g"] as? NSNumber)?.doubleValue,
+                    novaClass: 0,
+                    mindTags: [],
+                    isAlcohol: (it["is_alcohol"] as? Bool) ?? false
+                )
+            }
+            log("estimate_meal_from_text → \(items.count) items, GL \((p["glycemic_load"] as? NSNumber)?.intValue ?? 0)")
+            return MealEstimate(
+                netCarbsG: (p["net_carbs_g"] as? NSNumber)?.intValue ?? 0,
+                kcal: (p["kcal"] as? NSNumber)?.intValue ?? 0,
+                glycemicLoad: (p["glycemic_load"] as? NSNumber)?.intValue ?? 0,
+                giBand: (p["gi_band"] as? String) ?? "low",
+                isAlcohol: (p["is_alcohol"] as? Bool) ?? false,
+                confidence: (p["confidence"] as? String) ?? "none",
+                note: (p["note"] as? String) ?? "",
+                items: items
+            )
+        } catch {
+            log("estimate_meal_from_text error: \(error.localizedDescription)")
+            return nil
+        }
+    }
+
+    // MARK: - Last-night signals (sleep restlessness + illness early-warning)
+
+    /// Server `sleep_restlessness` for the latest night. nil on failure / no window.
+    func fetchSleepRestlessness() async -> SleepRestlessness? {
+        do {
+            try await ensureAuth()
+            guard let token = accessToken else { return nil }
+            let body: [String: Any] = ["p_user_id": userId]
+            let url = URL(string: "\(baseURL)/rest/v1/rpc/sleep_restlessness")!
+            var req = URLRequest(url: url)
+            req.httpMethod = "POST"
+            req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+            req.setValue(anonKey, forHTTPHeaderField: "apikey")
+            req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+            req.httpBody = try JSONSerialization.data(withJSONObject: body)
+            let (data, resp) = try await session.data(for: req)
+            let code = (resp as? HTTPURLResponse)?.statusCode ?? 0
+            guard code < 300 else { log("sleep_restlessness HTTP \(code)"); return nil }
+            let obj: [String: Any]?
+            if let arr = try JSONSerialization.jsonObject(with: data) as? [[String: Any]] { obj = arr.first }
+            else { obj = try JSONSerialization.jsonObject(with: data) as? [String: Any] }
+            guard let p = obj, p["error"] == nil else { return nil }
+            return SleepRestlessness(
+                date: (p["date"] as? String) ?? "",
+                inBedH: (p["in_bed_h"] as? NSNumber)?.doubleValue ?? 0,
+                sleepingHr: (p["sleeping_hr"] as? NSNumber)?.intValue ?? 0,
+                restlessMin: (p["restless_min"] as? NSNumber)?.intValue ?? 0,
+                wakeups: (p["wakeups"] as? NSNumber)?.intValue ?? 0,
+                stability: (p["stability"] as? NSNumber)?.intValue ?? 0,
+                dreamPeriodsEst: (p["dream_periods_est"] as? NSNumber)?.intValue ?? 0,
+                note: (p["note"] as? String) ?? ""
+            )
+        } catch {
+            log("sleep_restlessness error: \(error.localizedDescription)")
+            return nil
+        }
+    }
+
+    /// Server `illness_risk_now` for the latest night. nil on failure.
+    func fetchIllnessRisk() async -> IllnessRisk? {
+        do {
+            try await ensureAuth()
+            guard let token = accessToken else { return nil }
+            let body: [String: Any] = ["p_user_id": userId]
+            let url = URL(string: "\(baseURL)/rest/v1/rpc/illness_risk_now")!
+            var req = URLRequest(url: url)
+            req.httpMethod = "POST"
+            req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+            req.setValue(anonKey, forHTTPHeaderField: "apikey")
+            req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+            req.httpBody = try JSONSerialization.data(withJSONObject: body)
+            let (data, resp) = try await session.data(for: req)
+            let code = (resp as? HTTPURLResponse)?.statusCode ?? 0
+            guard code < 300 else { log("illness_risk_now HTTP \(code)"); return nil }
+            let obj: [String: Any]?
+            if let arr = try JSONSerialization.jsonObject(with: data) as? [[String: Any]] { obj = arr.first }
+            else { obj = try JSONSerialization.jsonObject(with: data) as? [String: Any] }
+            guard let p = obj else { return nil }
+            return IllnessRisk(
+                level: (p["level"] as? String) ?? "no_data",
+                risk: (p["risk"] as? NSNumber)?.intValue ?? 0,
+                note: (p["note"] as? String) ?? "",
+                rhr: (p["rhr"] as? NSNumber)?.doubleValue,
+                hrv: (p["hrv"] as? NSNumber)?.doubleValue
+            )
+        } catch {
+            log("illness_risk_now error: \(error.localizedDescription)")
+            return nil
+        }
     }
 
     // MARK: - Body Battery v2 (reservoir tank)

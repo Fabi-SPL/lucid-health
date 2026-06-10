@@ -15,6 +15,8 @@ struct ManualFoodEntrySheet: View {
     @State private var hasAnalyzed = false
     @State private var error: String?
     @State private var geminiResult: GeminiFoodResult?
+    @State private var estimate: MealEstimate?
+    @State private var isEstimating = false
 
     @FocusState private var descriptionFocused: Bool
 
@@ -54,6 +56,10 @@ struct ManualFoodEntrySheet: View {
                         if let totals = geminiResult?.mealTotals {
                             mealTotalsCard(totals)
                         }
+                    }
+
+                    if let est = estimate {
+                        glycemicCard(est)
                     }
 
                     if let error {
@@ -201,6 +207,33 @@ struct ManualFoodEntrySheet: View {
         .padding(.horizontal, DS.Spacing.md)
     }
 
+    // MARK: - Glycemic card (instant, server-estimated, no Gemini)
+
+    private func glycemicCard(_ est: MealEstimate) -> some View {
+        VStack(alignment: .leading, spacing: DS.Spacing.xs) {
+            sectionLabel("Carb impact · instant")
+            HStack(spacing: DS.Spacing.md) {
+                totalsCell(value: "\(est.netCarbsG)", unit: "g net carbs", color: DS.Colors.amber)
+                totalsCell(value: "\(est.glycemicLoad)", unit: "glycemic load", color: bandColor(est.giBand))
+                totalsCell(value: est.giBand.capitalized, unit: "GI band", color: bandColor(est.giBand))
+            }
+            Text(est.note)
+                .font(.system(size: 11, weight: .regular))
+                .foregroundStyle(DS.Colors.textMuted)
+                .padding(.top, 2)
+        }
+        .glassCard()
+        .padding(.horizontal, DS.Spacing.md)
+    }
+
+    private func bandColor(_ band: String) -> Color {
+        switch band {
+        case "high":   return DS.Colors.danger
+        case "medium": return DS.Colors.amber
+        default:       return DS.Colors.teal
+        }
+    }
+
     private func totalsCell(value: String, unit: String, color: Color) -> some View {
         VStack(alignment: .leading, spacing: 2) {
             Text(value)
@@ -238,13 +271,28 @@ struct ManualFoodEntrySheet: View {
             .disabled(isSaving || !canAnalyze)
             .opacity(canAnalyze ? 1.0 : 0.5)
 
+            // Instant, free, server-side carb/glycemic estimate (no Gemini quota).
+            Button { quickEstimate() } label: {
+                HStack {
+                    if isEstimating {
+                        ProgressView().tint(DS.Colors.teal)
+                    } else {
+                        Image(systemName: "bolt.fill")
+                        Text(estimate == nil ? "Estimate carbs · instant, free" : "Re-estimate carbs")
+                    }
+                }
+                .frame(maxWidth: .infinity)
+            }
+            .buttonStyle(GlassActionButtonStyle(tint: DS.Colors.teal, filled: false))
+            .disabled(!canAnalyze || isSaving || isEstimating)
+
             Button { hasAnalyzed ? reanalyze() : analyze() } label: {
                 HStack {
                     if isAnalyzing {
                         ProgressView().tint(DS.Colors.violet)
                     } else {
                         Image(systemName: hasAnalyzed ? "arrow.clockwise" : "sparkles")
-                        Text(hasAnalyzed ? "Re-analyze" : "Analyze with Gemini (optional)")
+                        Text(hasAnalyzed ? "Re-analyze" : "Deep analysis · Gemini (optional)")
                     }
                 }
                 .frame(maxWidth: .infinity)
@@ -287,6 +335,27 @@ struct ManualFoodEntrySheet: View {
 
     // MARK: - Actions
 
+    private func quickEstimate() {
+        descriptionFocused = false
+        isEstimating = true
+        error = nil
+        Task {
+            if let est = await supabase.estimateMealFromText(description) {
+                estimate = est
+                if !est.items.isEmpty {
+                    items = est.items
+                    hasAnalyzed = true
+                }
+                if !est.recognized {
+                    error = "Didn't recognise that one. Type a common food, or use deep analysis."
+                }
+            } else {
+                error = "Estimate failed. Try deep analysis instead."
+            }
+            isEstimating = false
+        }
+    }
+
     private func analyze() {
         descriptionFocused = false
         isAnalyzing = true
@@ -318,6 +387,8 @@ struct ManualFoodEntrySheet: View {
         Task {
             do {
                 let result = geminiResult
+                // Source: "text" when saved off the instant estimate, "manual" otherwise.
+                let usedTextEstimate = result == nil && estimate != nil
                 let entry = FoodEntry(
                     id: nil,
                     userId: SupabaseClient.shared.userId,
@@ -326,11 +397,11 @@ struct ManualFoodEntrySheet: View {
                     geminiRawJson: result?.notes,
                     items: items,
                     caption: description,
-                    totalKcal: result?.totalKcal,
+                    totalKcal: result?.totalKcal ?? estimate?.kcal,
                     novaAvg: result?.novaAvg,
                     mindScore: result?.mindScore,
-                    confidence: result?.confidence,
-                    source: "manual",
+                    confidence: result?.confidence ?? estimate?.confidence,
+                    source: usedTextEstimate ? "text" : "manual",
                     createdAt: nil
                 )
 
