@@ -1,4 +1,12 @@
 import SwiftUI
+import Charts
+
+/// One point on the 24h body-battery curve (server-reconstructed from realtime HR).
+struct BodyBatteryPoint: Identifiable {
+    let at: Date
+    let value: Double
+    var id: Date { at }
+}
 
 /// Body Battery hero — the MAIN metric on Today. A horizontal battery that fills
 /// with the carry-over tank level (green/amber/red), a big number, a plain-language
@@ -12,6 +20,7 @@ struct BodyBatteryHero: View {
     let recovery: Double       // demoted to secondary
     let sleepHours: Double
     let strain: Double         // 0..21
+    var trend: [BodyBatteryPoint] = []   // 24h curve (server) — empty = hide chart
 
     private var lvl: Int { Int(level.rounded()) }
     private var color: Color { DS.Colors.bodyBatteryColor(level) }
@@ -60,6 +69,28 @@ struct BodyBatteryHero: View {
             BatteryBar(level: level, color: color)
                 .frame(height: 30)
 
+            // 24h curve — the smooth glide over the day (server-reconstructed)
+            if trend.count >= 3 {
+                VStack(alignment: .leading, spacing: 4) {
+                    HStack {
+                        Text("TODAY")
+                            .font(.system(size: 9, weight: .bold))
+                            .tracking(1.2)
+                            .foregroundStyle(DS.Colors.textFaint)
+                        Spacer()
+                        if let lo = trend.map(\.value).min(), let hi = trend.map(\.value).max() {
+                            Text("\(Int(lo)) – \(Int(hi))")
+                                .font(.system(size: 9, weight: .medium, design: .rounded))
+                                .monospacedDigit()
+                                .foregroundStyle(DS.Colors.textFaint)
+                        }
+                    }
+                    BodyBatteryTrend(points: trend, color: color)
+                        .frame(height: 60)
+                }
+                .padding(.top, 2)
+            }
+
             // Plain-language status
             Text(statusLine)
                 .font(.system(size: 13, weight: .medium))
@@ -100,6 +131,56 @@ struct BodyBatteryHero: View {
         Rectangle()
             .fill(DS.Colors.border)
             .frame(width: 0.5, height: 24)
+    }
+}
+
+/// 24h body-battery curve — the smooth glide over the day. Area + line, faint hour ticks.
+/// Endpoint equals the big number (same server formula), so the chart and the gauge agree.
+private struct BodyBatteryTrend: View {
+    let points: [BodyBatteryPoint]
+    let color: Color
+
+    private var maxY: Double {
+        let hi = points.map(\.value).max() ?? 100
+        return max(10, (ceil((hi + 4) / 10) * 10))   // round up to nearest 10 + headroom
+    }
+
+    var body: some View {
+        Chart {
+            ForEach(points) { pt in
+                AreaMark(x: .value("time", pt.at), y: .value("battery", pt.value))
+                    .interpolationMethod(.catmullRom)
+                    .foregroundStyle(
+                        LinearGradient(colors: [color.opacity(0.30), color.opacity(0.02)],
+                                       startPoint: .top, endPoint: .bottom)
+                    )
+            }
+            ForEach(points) { pt in
+                LineMark(x: .value("time", pt.at), y: .value("battery", pt.value))
+                    .interpolationMethod(.catmullRom)
+                    .lineStyle(StrokeStyle(lineWidth: 2, lineCap: .round))
+                    .foregroundStyle(color)
+            }
+            if let last = points.last {
+                PointMark(x: .value("time", last.at), y: .value("battery", last.value))
+                    .symbolSize(34)
+                    .foregroundStyle(color)
+            }
+        }
+        .chartYScale(domain: 0...maxY)
+        .chartYAxis {
+            AxisMarks(values: [0, maxY]) { _ in
+                AxisGridLine().foregroundStyle(DS.Colors.border.opacity(0.4))
+            }
+        }
+        .chartXAxis {
+            AxisMarks(values: .stride(by: .hour, count: 4)) { _ in
+                AxisGridLine().foregroundStyle(DS.Colors.border.opacity(0.25))
+                AxisValueLabel(format: .dateTime.hour())
+                    .font(.system(size: 9))
+                    .foregroundStyle(DS.Colors.textFaint)
+            }
+        }
     }
 }
 

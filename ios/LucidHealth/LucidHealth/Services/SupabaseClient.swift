@@ -785,6 +785,44 @@ class SupabaseClient {
         }
     }
 
+    /// Fetch the smooth 24h body-battery curve (server-reconstructed from realtime HR).
+    /// Returns [] on failure — the hero just hides the chart, the big number still shows.
+    func fetchBodyBatterySeries() async -> [BodyBatteryPoint] {
+        do {
+            try await ensureAuth()
+            guard let token = accessToken else { return [] }
+            let body: [String: Any] = ["p_user_id": userId]
+            let url = URL(string: "\(baseURL)/rest/v1/rpc/body_battery_series")!
+            var req = URLRequest(url: url)
+            req.httpMethod = "POST"
+            req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+            req.setValue(anonKey, forHTTPHeaderField: "apikey")
+            req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+            req.httpBody = try JSONSerialization.data(withJSONObject: body)
+            let (data, resp) = try await session.data(for: req)
+            let code = (resp as? HTTPURLResponse)?.statusCode ?? 0
+            guard code < 300 else { log("body_battery_series HTTP \(code)"); return [] }
+            guard let rows = try JSONSerialization.jsonObject(with: data) as? [[String: Any]] else { return [] }
+            let iso = ISO8601DateFormatter()
+            iso.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+            let isoPlain = ISO8601DateFormatter()
+            isoPlain.formatOptions = [.withInternetDateTime]
+            var pts: [BodyBatteryPoint] = []
+            for row in rows {
+                guard let ts = row["at"] as? String else { continue }
+                let v = (row["value"] as? NSNumber)?.doubleValue
+                    ?? (row["value"] as? Double)
+                    ?? Double((row["value"] as? String) ?? "")
+                guard let value = v, let date = iso.date(from: ts) ?? isoPlain.date(from: ts) else { continue }
+                pts.append(BodyBatteryPoint(at: date, value: value))
+            }
+            return pts
+        } catch {
+            log("body_battery_series error: \(error.localizedDescription)")
+            return []
+        }
+    }
+
     // MARK: - Wake-Up Notification
 
     func notifyWakeUp(completion: @escaping (Bool) -> Void) {
