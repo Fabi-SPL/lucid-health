@@ -140,9 +140,11 @@ struct TodayView: View {
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             ToolbarItem(placement: .principal) {
+                // Greeting moved to the prominent in-scroll header; toolbar is just
+                // the wordmark now (no duplicate greeting).
                 TwoToneHeadline(
-                    primary: timeOfDayGreeting,
-                    secondary: " · LucidHealth",
+                    primary: "Lucid",
+                    secondary: "Health",
                     font: .system(size: 17, weight: .heavy, design: .rounded)
                 )
             }
@@ -259,6 +261,47 @@ struct TodayView: View {
         }
     }
 
+    // MARK: - Greeting header (prominent, adaptive, dated)
+
+    private var greetingPhrase: String {
+        let h = Calendar.current.component(.hour, from: Date())
+        switch h {
+        case 5..<12:  return "Good morning"
+        case 12..<17: return "Good afternoon"
+        case 17..<22: return "Good evening"
+        default:       return "Still up"
+        }
+    }
+
+    private var greetingDateLine: String {
+        let f = DateFormatter()
+        f.dateFormat = "EEEE, d MMMM"
+        f.locale = Locale(identifier: "en_US")
+        return f.string(from: Date()).uppercased()
+    }
+
+    private var greetingHeader: some View {
+        VStack(alignment: .leading, spacing: 3) {
+            (
+                Text(greetingPhrase + ", ")
+                    .foregroundStyle(DS.Colors.textPrimary)
+                + Text("Fabi")
+                    .foregroundStyle(DS.Colors.violet)
+            )
+            .font(.system(size: 30, weight: .heavy, design: .rounded))
+            .kerning(-0.6)
+
+            Text(greetingDateLine)
+                .font(.system(size: 11, weight: .bold, design: .rounded))
+                .tracking(1.6)
+                .foregroundStyle(DS.Colors.textMuted)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.horizontal, DS.Spacing.md)
+        .padding(.top, DS.Spacing.sm)
+        .padding(.bottom, DS.Spacing.xs)
+    }
+
     // MARK: - Regular Content (Morning / Day / Evening / Wind-Down)
 
     @ViewBuilder
@@ -274,6 +317,14 @@ struct TodayView: View {
         ScrollView(showsIndicators: false) {
             VStack(spacing: 0) {
                 Color.clear.frame(height: DS.Spacing.xs)
+
+                // Prominent adaptive greeting — the day's anchor. Time-aware phrase
+                // + today's full date (so it's also a live "you're on a fresh build"
+                // tell). Replaces the tiny nav-bar greeting as the warm entry point.
+                greetingHeader
+                    .opacity(appeared ? 1 : 0)
+                    .offset(y: appeared ? 0 : 14)
+                    .animation(DS.Anim.cardAppear, value: appeared)
 
                 ModeBanner(mode: modeStore.current, modeStore: modeStore)
                     .padding(.top, DS.Spacing.sm)
