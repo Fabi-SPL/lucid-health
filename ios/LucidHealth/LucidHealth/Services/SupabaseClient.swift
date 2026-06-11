@@ -2581,7 +2581,27 @@ extension SupabaseClient {
 
         let decoder = JSONDecoder()
         decoder.dateDecodingStrategy = .iso8601
-        return try decoder.decode([FoodEntry].self, from: data)
+        // Fast path: whole-array decode.
+        if let all = try? decoder.decode([FoodEntry].self, from: data) {
+            return all
+        }
+        // Tolerant fallback: one malformed row (e.g. gemini_raw_json stored as a
+        // jsonb OBJECT instead of a String) used to throw for the ENTIRE list →
+        // "Load failed" on every refresh while cached rows still showed. Decode
+        // row-by-row and skip only the bad ones so a single shape-drift row can
+        // never blank the food list again.
+        guard let rows = try JSONSerialization.jsonObject(with: data) as? [[String: Any]] else {
+            throw NSError(domain: "Supabase", code: -2,
+                          userInfo: [NSLocalizedDescriptionKey: "food_entries: unexpected payload shape"])
+        }
+        var out: [FoodEntry] = []
+        out.reserveCapacity(rows.count)
+        for obj in rows {
+            guard let rowData = try? JSONSerialization.data(withJSONObject: obj),
+                  let entry = try? decoder.decode(FoodEntry.self, from: rowData) else { continue }
+            out.append(entry)
+        }
+        return out
     }
 
     // MARK: - Photo Upload
