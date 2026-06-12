@@ -245,6 +245,7 @@ class BLEManager: NSObject, ObservableObject {
     @Published var showDoubleTapSheet: Bool = false  // Triggers quick-action picker in UI
     private var doubleTapDebounce: Date = .distantPast
     private var pendingTapTimestamp: Date?       // Tap time for logging context
+    private var lastFavoriteAutoLog: Date = .distantPast  // zero-tap favorite escalation window
     private var lastAutoDetectedActivity: Date = .distantPast  // When auto-detect last fired
     private var autoDetectStartTime: Date?  // When current auto-detected activity began
 
@@ -2885,19 +2886,30 @@ extension BLEManager: CBPeripheralDelegate {
         // ACK buzz — short confirmation vibration (use runHapticPattern for auto-stop safety)
         runHapticPattern(0)
 
-        log("DOUBLE TAP — showing quick action sheet")
+        log("DOUBLE TAP detected")
         pendingTapTimestamp = now
 
+        // Zero-tap quick log: a double-tap instantly logs your #1 most-used item
+        // (e.g. Double Espresso) — no sheet. A SECOND double-tap within 30s opens
+        // the full picker instead ("tap-tap = usual, tap-tap again = pick"). First-ever
+        // use (no history) falls through to the sheet. Disable via UserDefaults flag.
+        let favoriteDisabled = UserDefaults.standard.bool(forKey: "lucid_disable_doubletap_favorite")
         DispatchQueue.main.async {
             self.lastDoubleTap = now
-            self.doubleTapMessage = "What happened?"
-            self.showDoubleTapSheet = true
+            let escalate = now.timeIntervalSince(self.lastFavoriteAutoLog) < 30
+            if !favoriteDisabled, !escalate, let fav = QuickLogHistory.shared.topItems(limit: 1).first {
+                self.lastFavoriteAutoLog = now
+                self.doubleTapMessage = "\(fav.emoji) \(fav.displayName) logged"
+                self.logDoubleTapEvent(type: fav.type, category: fav.category, displayName: fav.displayName)
+            } else {
+                self.doubleTapMessage = "What happened?"
+                self.showDoubleTapSheet = true
+                self.sendQuickTagNotification(
+                    title: "Double tap captured",
+                    body: "Open Lucid to tag what just happened."
+                )
+            }
         }
-
-        sendQuickTagNotification(
-            title: "Double tap captured",
-            body: "Lucid is ready to tag what just happened."
-        )
     }
 
     /// Called from the UI when user picks a quick-action from the double-tap sheet
@@ -3003,7 +3015,7 @@ extension BLEManager: CBPeripheralDelegate {
         let isDrink = (type == "water" || type == "caffeine" || type == "alcohol")
 
         // Default kcal estimates — user can edit later
-        let kcal: Int = {
+        let baseKcal: Int = {
             switch type {
             case "water": return 0
             case "supplement": return 0
@@ -3013,6 +3025,9 @@ extension BLEManager: CBPeripheralDelegate {
             default: return 0
             }
         }()
+        // "double"/"doppel"/"2x" doubles the estimate (mirrors server estimate_meal_from_text).
+        let lname = name.lowercased()
+        let kcal = (baseKcal > 0 && (lname.contains("double") || lname.contains("doppel") || lname.hasPrefix("2 ") || lname.contains("x2"))) ? baseKcal * 2 : baseKcal
 
         let novaClass: Int = {
             switch type {
