@@ -27,7 +27,7 @@ struct FoodView: View {
         case .all:     return entries
         case .photo:   return entries.filter { $0.source == "photo" }
         case .barcode: return entries.filter { $0.source == "barcode" }
-        case .quick:   return entries.filter { $0.source == "quick_log" }
+        case .quick:   return entries.filter { $0.source == "quick_tag" || $0.source == "quick_log" }
         }
     }
 
