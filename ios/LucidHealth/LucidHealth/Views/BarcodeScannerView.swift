@@ -3,6 +3,9 @@ import VisionKit
 
 /// DataScannerViewController wrapper — fires once per valid barcode.
 struct BarcodeScannerView: UIViewControllerRepresentable {
+    /// When set, the scanned product is returned as a DetectedItem WITHOUT saving
+    /// (meal-builder mode). When nil, it saves a standalone barcode entry.
+    var onItem: ((DetectedItem) -> Void)? = nil
     let onEntry: (FoodEntry) -> Void
     @Environment(\.dismiss) private var dismiss
 
@@ -49,13 +52,15 @@ struct BarcodeScannerView: UIViewControllerRepresentable {
     @MainActor
     private func lookup(code: String, scanner: DataScannerViewController) async {
         do {
-            let entry = try await SupabaseClient.shared.saveBarcodeEntry(
-                product: try await OpenFoodFactsClient.shared.lookup(barcode: code)
-            )
-            onEntry(entry)
+            let product = try await OpenFoodFactsClient.shared.lookup(barcode: code)
+            if let onItem {
+                onItem(SupabaseClient.shared.barcodeItem(from: product))
+            } else {
+                onEntry(try await SupabaseClient.shared.saveBarcodeEntry(product: product))
+            }
             dismiss()
         } catch {
-            // Show result view fallback — present BarcodeResultView inline
+            // Lookup failed (not found / network) — just close.
             dismiss()
         }
     }
