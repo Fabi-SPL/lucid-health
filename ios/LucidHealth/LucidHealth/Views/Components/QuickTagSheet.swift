@@ -21,8 +21,9 @@ struct QuickTagSheet: View {
 
     private let categories: [QuickLogCategory] = [
         QuickLogCategory(label: "Intake", color: DS.Colors.amber, items: [
-            ("☕", "Espresso",     "espresso",   "caffeine",   "intake"),
-            ("☕", "Cappuccino",   "cappuccino", "caffeine",   "intake"),
+            ("☕", "Espresso",        "espresso",        "caffeine", "intake"),
+            ("☕", "Double Espresso", "double espresso", "caffeine", "intake"),
+            ("☕", "Cappuccino",      "cappuccino",      "caffeine", "intake"),
             ("☕", "Coffee",       "coffee",     "caffeine",   "intake"),
             ("💧", "Water",        "water",      "water",      "intake"),
             ("💊", "Supplement",   "supplement", "supplement", "intake"),
@@ -256,7 +257,7 @@ struct QuickTagSheet: View {
         h.impactOccurred()
         let canonical = name ?? displayName.lowercased()
         history.record(name: canonical, displayName: displayName, emoji: emoji, category: category, type: type)
-        ble.logDoubleTapEvent(type: type, category: category)
+        ble.logDoubleTapEvent(type: type, category: category, displayName: displayName)
         showSavedToast("\(emoji) \(displayName)")
     }
 
