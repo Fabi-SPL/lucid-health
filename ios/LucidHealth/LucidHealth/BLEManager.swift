@@ -2901,7 +2901,7 @@ extension BLEManager: CBPeripheralDelegate {
     }
 
     /// Called from the UI when user picks a quick-action from the double-tap sheet
-    func logDoubleTapEvent(type: String, category: String = "marker") {
+    func logDoubleTapEvent(type: String, category: String = "marker", displayName: String? = nil) {
         let tapTime = pendingTapTimestamp ?? Date()
         pendingTapTimestamp = nil
 
@@ -2936,7 +2936,10 @@ extension BLEManager: CBPeripheralDelegate {
         // Per Fabi: 'I logged my espresso and it didn't appear in the meals thingy'
         // — that's because intake was only going to activities. Now both.
         if category == "intake" {
-            Task { await self.mirrorIntakeToFoodEntries(name: activityName(type), at: tapTime, type: type) }
+            // Use the friendly chip label ("Espresso") not the type ("Caffeine")
+            // so the Food tab shows what was actually logged.
+            let foodName = (displayName?.isEmpty == false) ? displayName! : activityName(type)
+            Task { await self.mirrorIntakeToFoodEntries(name: foodName, at: tapTime, type: type) }
         }
     }
 
