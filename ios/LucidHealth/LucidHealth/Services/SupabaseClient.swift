@@ -2653,6 +2653,55 @@ extension SupabaseClient {
         return try await saveFoodEntry(entry)
     }
 
+    // MARK: - Body Profile + Meal HR
+
+    /// Upsert the user's body profile so the SERVER food-analysis prompts can
+    /// calibrate portion sizes to THIS person (weight is the single biggest
+    /// factor in intake estimation). Fire-and-forget; failures are logged only.
+    func saveBodyProfile(weightKg: Double, heightCm: Double?, age: Int?, sex: String?) async {
+        do {
+            try await ensureAuth()
+            guard let token = accessToken else { return }
+            var body: [String: Any] = ["user_id": userId, "weight_kg": weightKg,
+                                       "updated_at": ISO8601DateFormatter().string(from: Date())]
+            if let heightCm { body["height_cm"] = heightCm }
+            if let age { body["age"] = age }
+            if let sex { body["sex"] = sex }
+            let url = URL(string: "\(baseURL)/rest/v1/user_body_profile?on_conflict=user_id")!
+            var req = URLRequest(url: url)
+            req.httpMethod = "POST"
+            req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+            req.setValue(anonKey, forHTTPHeaderField: "apikey")
+            req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+            req.setValue("resolution=merge-duplicates", forHTTPHeaderField: "Prefer")
+            req.httpBody = try JSONSerialization.data(withJSONObject: body)
+            let (_, resp) = try await session.data(for: req)
+            log("Body profile saved (\(Int(weightKg))kg) → HTTP \((resp as? HTTPURLResponse)?.statusCode ?? 0)")
+        } catch {
+            log("saveBodyProfile error: \(error.localizedDescription)")
+        }
+    }
+
+    /// Post-prandial HR response for a logged meal (server meal_hr_response RPC).
+    /// Returns the raw dict: verdict, pre_hr, post_mean, adj_bump_bpm, note.
+    func fetchMealHrResponse(mealId: String) async -> [String: Any]? {
+        do {
+            try await ensureAuth()
+            guard let token = accessToken else { return nil }
+            let body: [String: Any] = ["p_user_id": userId, "p_meal_id": mealId]
+            let url = URL(string: "\(baseURL)/rest/v1/rpc/meal_hr_response")!
+            var req = URLRequest(url: url)
+            req.httpMethod = "POST"
+            req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+            req.setValue(anonKey, forHTTPHeaderField: "apikey")
+            req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+            req.httpBody = try JSONSerialization.data(withJSONObject: body)
+            let (data, resp) = try await session.data(for: req)
+            guard ((resp as? HTTPURLResponse)?.statusCode ?? 0) < 300 else { return nil }
+            return try JSONSerialization.jsonObject(with: data) as? [String: Any]
+        } catch { return nil }
+    }
+
     // MARK: - Barcode Entry
 
     /// Save a barcode-scanned product as a food entry.
