@@ -1,4 +1,5 @@
 import SwiftUI
+import PhotosUI
 
 // MARK: - FoodView
 // Principle #11: format diversity — METRICS (bento) → CHIPS (filter) → CARDS (meal list)
@@ -15,6 +16,7 @@ struct FoodView: View {
     @State private var showBarcode = false
     @State private var showManual = false
     @State private var showFABMenu = false
+    @State private var showBuilder = false
     @State private var appeared = false
     @State private var saveSuccessCount = 0
     @State private var saveErrorCount = 0
@@ -131,13 +133,13 @@ struct FoodView: View {
             // FAB
             VStack(spacing: DS.Spacing.sm) {
                 if showFABMenu {
-                    FABMenu(isOpen: $showFABMenu) {
-                        showCamera = true
-                    } onBarcode: {
-                        showBarcode = true
-                    } onManual: {
-                        showManual = true
-                    }
+                    FABMenu(
+                        isOpen: $showFABMenu,
+                        onCamera: { showCamera = true },
+                        onBarcode: { showBarcode = true },
+                        onManual: { showManual = true },
+                        onBuild: { showBuilder = true }
+                    )
                     .padding(.trailing, DS.Spacing.lg)
                 }
 
@@ -167,6 +169,11 @@ struct FoodView: View {
         }
         .fullScreenCover(isPresented: $showManual) {
             ManualFoodEntrySheet { entry in
+                entries.insert(entry, at: 0)
+            }
+        }
+        .fullScreenCover(isPresented: $showBuilder) {
+            MealBuilderSheet { entry in
                 entries.insert(entry, at: 0)
             }
         }
@@ -936,5 +943,235 @@ private struct FoodDetailView: View {
                 .background(Capsule().fill(DS.Colors.violet.opacity(0.12)).overlay(Capsule().stroke(DS.Colors.violet.opacity(0.3), lineWidth: 0.5)))
         }
         .buttonStyle(.plain)
+    }
+}
+
+// MARK: - Meal Builder (combine barcode + described + photo into one entry)
+
+private struct MealBuilderSheet: View {
+    let onSaved: (FoodEntry) -> Void
+    @Environment(\.dismiss) private var dismiss
+
+    @State private var caption = ""
+    @State private var items: [DetectedItem] = []
+    @State private var describeText = ""
+    @State private var isAnalyzing = false
+    @State private var analyzingLabel = ""
+    @State private var showBarcode = false
+    @State private var photoItem: PhotosPickerItem?
+    @State private var isSaving = false
+    @State private var error: String?
+
+    private var totalKcal: Int { items.reduce(0) { $0 + $1.kcal } }
+
+    var body: some View {
+        NavigationStack {
+            ScrollView(showsIndicators: false) {
+                VStack(spacing: DS.Spacing.lg) {
+                    Color.clear.frame(height: 2)
+                    nameCard
+                    addRow
+                    describeCard
+                    if isAnalyzing { analyzingBanner }
+                    if !items.isEmpty { draftCard }
+                    if let error {
+                        AlertBanner(icon: "exclamationmark.triangle", message: error, color: DS.Colors.pink)
+                    }
+                    saveButton
+                    Color.clear.frame(height: DS.Spacing.lg)
+                }
+                .padding(.horizontal, DS.Spacing.md)
+            }
+            .background(MeshGradientBackground().ignoresSafeArea())
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .principal) {
+                    TwoToneHeadline(primary: "Build", secondary: " · meal", font: .system(size: 17, weight: .heavy, design: .rounded))
+                }
+                ToolbarItem(placement: .navigationBarLeading) {
+                    Button("Cancel") { dismiss() }.foregroundStyle(DS.Colors.textSecondary)
+                }
+            }
+        }
+        .fullScreenCover(isPresented: $showBarcode) {
+            BarcodeItemScannerSheet { item in items.append(item) }
+        }
+        .onChange(of: photoItem) { _, newVal in
+            guard let newVal else { return }
+            Task { await analyzePhoto(newVal) }
+        }
+    }
+
+    private var nameCard: some View {
+        VStack(alignment: .leading, spacing: DS.Spacing.sm) {
+            SectionHeader(icon: "text.cursor", title: "MEAL NAME", iconColor: DS.Colors.violet)
+            TextField("e.g. Toast with cheddar + ham", text: $caption)
+                .font(.system(size: 14, weight: .medium))
+                .padding(.horizontal, 12).padding(.vertical, 10)
+                .background(DS.Colors.surfaceElevated)
+                .clipShape(RoundedRectangle(cornerRadius: DS.Radius.md, style: .continuous))
+                .foregroundStyle(DS.Colors.textPrimary)
+        }
+        .padding(DS.Spacing.md).glassDefault()
+    }
+
+    private var addRow: some View {
+        HStack(spacing: DS.Spacing.sm) {
+            PhotosPicker(selection: $photoItem, matching: .images) {
+                addButton(icon: "camera.fill", label: "Photo", color: DS.Colors.violet)
+            }
+            Button { showBarcode = true } label: {
+                addButton(icon: "barcode.viewfinder", label: "Barcode", color: DS.Colors.teal)
+            }
+            .buttonStyle(.plain)
+        }
+    }
+
+    private func addButton(icon: String, label: String, color: Color) -> some View {
+        VStack(spacing: 6) {
+            Image(systemName: icon).font(.system(size: 20, weight: .semibold)).foregroundStyle(color)
+            Text(label).font(.system(size: 11, weight: .semibold, design: .rounded)).foregroundStyle(DS.Colors.textSecondary)
+        }
+        .frame(maxWidth: .infinity).padding(.vertical, DS.Spacing.md).glassDefault()
+    }
+
+    private var describeCard: some View {
+        VStack(alignment: .leading, spacing: DS.Spacing.sm) {
+            SectionHeader(icon: "text.bubble", title: "DESCRIBE & ADD", iconColor: DS.Colors.amber)
+            HStack(spacing: DS.Spacing.sm) {
+                TextField("e.g. 2 slices toast, baked", text: $describeText, axis: .vertical)
+                    .font(.system(size: 14)).lineLimit(1...3)
+                    .padding(.horizontal, 12).padding(.vertical, 10)
+                    .background(DS.Colors.surfaceElevated)
+                    .clipShape(RoundedRectangle(cornerRadius: DS.Radius.md, style: .continuous))
+                    .foregroundStyle(DS.Colors.textPrimary)
+                Button { Task { await analyzeText() } } label: {
+                    Image(systemName: "plus.circle.fill").font(.system(size: 30))
+                        .foregroundStyle(describeText.isEmpty ? DS.Colors.textMuted : DS.Colors.amber)
+                }
+                .buttonStyle(.plain).disabled(describeText.trimmingCharacters(in: .whitespaces).isEmpty || isAnalyzing)
+            }
+        }
+        .padding(DS.Spacing.md).glassDefault()
+    }
+
+    private var analyzingBanner: some View {
+        HStack(spacing: 8) {
+            ProgressView().tint(DS.Colors.violet)
+            Text(analyzingLabel.isEmpty ? "Analyzing…" : analyzingLabel)
+                .font(.system(size: 12)).foregroundStyle(DS.Colors.textMuted)
+        }
+        .frame(maxWidth: .infinity).padding(DS.Spacing.md).glassDefault()
+    }
+
+    private var draftCard: some View {
+        VStack(alignment: .leading, spacing: DS.Spacing.sm) {
+            HStack {
+                SectionHeader(icon: "list.bullet", title: "THIS MEAL", iconColor: DS.Colors.teal)
+                Spacer()
+                Text("\(totalKcal) kcal").font(.system(size: 13, weight: .bold, design: .rounded)).foregroundStyle(DS.Colors.amber)
+            }
+            ForEach(items) { item in
+                HStack(spacing: DS.Spacing.sm) {
+                    Text(item.name).font(.system(size: 13, weight: .medium)).foregroundStyle(DS.Colors.textPrimary).lineLimit(1)
+                    Spacer()
+                    if item.grams > 0 { Text("\(item.grams)g").font(.system(size: 10, design: .monospaced)).foregroundStyle(DS.Colors.textFaint) }
+                    Text("\(item.kcal)").font(.system(size: 11, weight: .semibold)).foregroundStyle(DS.Colors.amber)
+                    Button { items.removeAll { $0.id == item.id } } label: {
+                        Image(systemName: "minus.circle.fill").font(.system(size: 16)).foregroundStyle(DS.Colors.danger.opacity(0.8))
+                    }
+                    .buttonStyle(.plain)
+                }
+                .padding(.vertical, 6).padding(.horizontal, 10)
+                .background(RoundedRectangle(cornerRadius: DS.Radius.sm, style: .continuous).fill(DS.Colors.surface))
+            }
+        }
+        .padding(DS.Spacing.md).glassDefault()
+    }
+
+    private var saveButton: some View {
+        Button { Task { await save() } } label: {
+            HStack {
+                if isSaving { ProgressView().tint(.white) }
+                else {
+                    Image(systemName: "checkmark")
+                    Text(items.isEmpty ? "Add something first" : "Save meal · \(items.count) item\(items.count == 1 ? "" : "s")")
+                }
+            }
+            .font(.system(size: 14, weight: .semibold, design: .rounded))
+            .foregroundStyle(.white).frame(maxWidth: .infinity).padding(.vertical, DS.Spacing.md)
+            .background(Capsule().fill(items.isEmpty ? DS.Colors.textMuted : DS.Colors.violet))
+        }
+        .buttonStyle(.plain).disabled(items.isEmpty || isSaving)
+    }
+
+    // MARK: actions
+
+    private func analyzeText() async {
+        let t = describeText.trimmingCharacters(in: .whitespaces)
+        guard !t.isEmpty else { return }
+        isAnalyzing = true; analyzingLabel = "Reading “\(t.prefix(24))”…"; error = nil
+        if let r = try? await GeminiClient.shared.analyzeFood(description: t) {
+            items.append(contentsOf: r.items)
+            describeText = ""
+        } else {
+            error = "Couldn't analyze that — try simpler wording."
+        }
+        isAnalyzing = false; analyzingLabel = ""
+    }
+
+    private func analyzePhoto(_ pick: PhotosPickerItem) async {
+        isAnalyzing = true; analyzingLabel = "Analyzing photo…"; error = nil
+        if let data = try? await pick.loadTransferable(type: Data.self), let img = UIImage(data: data) {
+            if let r = try? await GeminiClient.shared.analyzeFood(image: img, caption: caption.isEmpty ? nil : caption) {
+                items.append(contentsOf: r.items)
+            } else { error = "Photo analysis failed — add it another way." }
+        }
+        photoItem = nil
+        isAnalyzing = false; analyzingLabel = ""
+    }
+
+    private func save() async {
+        guard !items.isEmpty else { return }
+        isSaving = true; error = nil
+        do {
+            let saved = try await SupabaseClient.shared.saveCombinedMeal(items: items, caption: caption)
+            onSaved(saved)
+            dismiss()
+        } catch {
+            self.error = "Save failed — check connection."
+            isSaving = false
+        }
+    }
+}
+
+// MARK: - Barcode scanner in item-return mode (for the meal builder)
+
+private struct BarcodeItemScannerSheet: View {
+    let onItem: (DetectedItem) -> Void
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        ZStack(alignment: .topLeading) {
+            Color.black.ignoresSafeArea()
+            BarcodeScannerView(onItem: { item in onItem(item) }, onEntry: { _ in })
+                .ignoresSafeArea()
+            Button { dismiss() } label: {
+                Image(systemName: "xmark.circle.fill")
+                    .font(.system(size: 30))
+                    .foregroundStyle(.white.opacity(0.9))
+                    .padding()
+            }
+            .buttonStyle(.plain)
+            VStack {
+                Spacer()
+                Text("Scan a barcode to add it to the meal")
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundStyle(.white.opacity(0.85))
+                    .padding(8).background(.black.opacity(0.4)).clipShape(Capsule())
+                    .padding(.bottom, DS.Spacing.xl)
+                    .frame(maxWidth: .infinity)
+            }
+        }
     }
 }
