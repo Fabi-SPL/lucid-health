@@ -21,6 +21,7 @@ struct FoodView: View {
     @State private var deleteSuccessCount = 0
     @State private var pendingDelete: FoodEntry?
     @State private var editing: FoodEntry?
+    @State private var detailEntry: FoodEntry?
 
     private var filtered: [FoodEntry] {
         switch filter {
@@ -190,6 +191,13 @@ struct FoodView: View {
             )
             .presentationDetents([.large])
         }
+        .sheet(item: $detailEntry) { entry in
+            FoodDetailView(entry: entry) { updated in
+                if let idx = entries.firstIndex(where: { $0.id == updated.id }) {
+                    entries[idx] = updated
+                }
+            }
+        }
         .confirmationDialog(
             "Delete this entry?",
             isPresented: Binding(
@@ -250,6 +258,8 @@ struct FoodView: View {
                             .listRowInsets(EdgeInsets())
                             .listRowBackground(Color.clear)
                             .listRowSeparator(.hidden)
+                            .contentShape(Rectangle())
+                            .onTapGesture { detailEntry = entry }
                             .swipeActions(edge: .trailing, allowsFullSwipe: false) {
                                 Button(role: .destructive) {
                                     pendingDelete = entry
@@ -647,5 +657,284 @@ private struct FoodQualityRow: View {
 
     private func novaColor(_ nova: Int) -> Color {
         DS.Colors.novaColor(Double(nova))
+    }
+}
+
+// MARK: - Food Detail View (tap a meal → full breakdown + body response)
+
+private struct FoodDetailView: View {
+    @State private var entry: FoodEntry
+    let onChanged: (FoodEntry) -> Void
+
+    @Environment(\.dismiss) private var dismiss
+    @State private var showEdit = false
+    @State private var hr: [String: Any]? = nil
+    @State private var hrLoading = true
+
+    init(entry: FoodEntry, onChanged: @escaping (FoodEntry) -> Void) {
+        _entry = State(initialValue: entry)
+        self.onChanged = onChanged
+    }
+
+    // MARK: derived
+
+    private var raw: [String: Any]? {
+        guard let s = entry.geminiRawJson, let d = s.data(using: .utf8) else { return nil }
+        return (try? JSONSerialization.jsonObject(with: d)) as? [String: Any]
+    }
+    private var mealTotals: [String: Any]? { raw?["meal_totals"] as? [String: Any] }
+    private var brain: [String: Any]? { raw?["brain_score"] as? [String: Any] }
+
+    private func intOf(_ a: Any?) -> Int? { (a as? NSNumber)?.intValue ?? (a as? Int) }
+    private func dblOf(_ a: Any?) -> Double? { (a as? NSNumber)?.doubleValue ?? (a as? Double) }
+    private func strOf(_ a: Any?) -> String? { a as? String }
+    private func strArr(_ a: Any?) -> [String] { (a as? [String]) ?? [] }
+
+    private func macroSum(_ kp: (DetectedItem) -> Double?) -> Double? {
+        let v = entry.items.compactMap(kp); return v.isEmpty ? nil : v.reduce(0, +)
+    }
+
+    private var kcalLow: Int? { intOf(mealTotals?["estimated_calories_low"]) }
+    private var kcalHigh: Int? { intOf(mealTotals?["estimated_calories_high"]) }
+    private var protein: Double? { dblOf(mealTotals?["protein_g_estimate"]) ?? macroSum { $0.proteinG } }
+    private var carbs: Double? { dblOf(mealTotals?["carbs_g_estimate"]) ?? macroSum { $0.carbsG } }
+    private var fat: Double? { dblOf(mealTotals?["fat_g_estimate"]) ?? macroSum { $0.fatG } }
+    private var fiber: Double? { dblOf(mealTotals?["fiber_g_estimate"]) ?? macroSum { $0.fiberG } }
+    private var brainScore: Int? { entry.mindScore ?? intOf(brain?["total"]) }
+    private var confidence: String { entry.confidence ?? strOf(mealTotals?["confidence_level"]) ?? "—" }
+
+    private var sourceLabel: String {
+        switch entry.source {
+        case "photo": return "Photo + AI"
+        case "text": return "Described · AI"
+        case "manual": return "Typed · AI"
+        case "barcode": return "Barcode · label data"
+        case "quick_tag", "quick_log": return "Quick log"
+        default: return entry.source
+        }
+    }
+
+    var body: some View {
+        NavigationStack {
+            ScrollView(showsIndicators: false) {
+                VStack(spacing: DS.Spacing.lg) {
+                    Color.clear.frame(height: 2)
+                    headerCard
+                    kcalCard
+                    if protein != nil || carbs != nil || fat != nil { macroCard }
+                    scoreCard
+                    hrCard
+                    itemsSection
+                    methodNote
+                    editButton
+                    Color.clear.frame(height: DS.Spacing.lg)
+                }
+                .padding(.horizontal, DS.Spacing.md)
+            }
+            .background(MeshGradientBackground().ignoresSafeArea())
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .principal) {
+                    TwoToneHeadline(primary: "Meal", secondary: " · detail", font: .system(size: 17, weight: .heavy, design: .rounded))
+                }
+                ToolbarItem(placement: .navigationBarTrailing) {
+                    Button("Done") { dismiss() }.foregroundStyle(DS.Colors.textSecondary)
+                }
+            }
+        }
+        .task {
+            guard let id = entry.id?.uuidString else { hrLoading = false; return }
+            hr = await SupabaseClient.shared.fetchMealHrResponse(mealId: id)
+            hrLoading = false
+        }
+        .sheet(isPresented: $showEdit) {
+            EditFoodEntrySheet(entry: entry, onSaved: { updated in
+                entry = updated; onChanged(updated); showEdit = false
+            }, onCancel: { showEdit = false })
+            .presentationDetents([.large])
+        }
+    }
+
+    // MARK: cards
+
+    private var headerCard: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text(entry.caption ?? entry.items.map(\.name).joined(separator: ", "))
+                .font(.system(size: 20, weight: .heavy, design: .rounded))
+                .foregroundStyle(DS.Colors.textPrimary)
+            HStack(spacing: DS.Spacing.sm) {
+                Text(entry.capturedAt.formatted(.dateTime.weekday().hour().minute()))
+                    .font(.system(size: 11, weight: .regular, design: .monospaced))
+                    .foregroundStyle(DS.Colors.textFaint)
+                StatusChip(text: sourceLabel, style: .violet)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(DS.Spacing.md)
+        .glassDefault()
+    }
+
+    private var kcalCard: some View {
+        VStack(spacing: 4) {
+            Text("\(entry.totalKcal ?? entry.items.reduce(0) { $0 + $1.kcal })")
+                .font(.system(size: 44, weight: .heavy, design: .rounded))
+                .foregroundStyle(DS.Colors.amber)
+                .monospacedDigit()
+            Text("kcal").font(.system(size: 12, weight: .semibold)).foregroundStyle(DS.Colors.textMuted)
+            if let lo = kcalLow, let hi = kcalHigh, hi > lo {
+                Text("likely \(lo)–\(hi) kcal")
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundStyle(DS.Colors.textFaint)
+                    .padding(.top, 2)
+            }
+            Text("confidence: \(confidence)")
+                .font(.system(size: 10, weight: .medium))
+                .foregroundStyle(DS.Colors.textFaint)
+        }
+        .frame(maxWidth: .infinity)
+        .padding(DS.Spacing.lg)
+        .glassDefault()
+    }
+
+    private var macroCard: some View {
+        HStack(spacing: DS.Spacing.sm) {
+            macroTile("Protein", protein, "g", DS.Colors.teal)
+            macroTile("Carbs", carbs, "g", DS.Colors.amber)
+            macroTile("Fat", fat, "g", DS.Colors.pink)
+            macroTile("Fiber", fiber, "g", DS.Colors.violet)
+        }
+    }
+
+    private func macroTile(_ label: String, _ v: Double?, _ unit: String, _ color: Color) -> some View {
+        VStack(spacing: 2) {
+            Text(v != nil ? String(format: "%.0f", v!) : "—")
+                .font(.system(size: 18, weight: .bold, design: .rounded))
+                .foregroundStyle(color).monospacedDigit()
+            Text(label).font(.system(size: 9, weight: .medium)).foregroundStyle(DS.Colors.textFaint)
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, DS.Spacing.md)
+        .glassDefault()
+    }
+
+    private var scoreCard: some View {
+        HStack(spacing: DS.Spacing.md) {
+            VStack(spacing: 2) {
+                Text(brainScore.map { "\($0)" } ?? "—")
+                    .font(.system(size: 22, weight: .heavy, design: .rounded))
+                    .foregroundStyle(DS.Colors.mindColor(Double(brainScore ?? 0)))
+                    .monospacedDigit()
+                Text("BRAIN").font(.system(size: 9, weight: .bold)).foregroundStyle(DS.Colors.textFaint).tracking(0.8)
+            }
+            .frame(maxWidth: .infinity)
+            Divider().frame(height: 30)
+            VStack(spacing: 2) {
+                Text(entry.novaAvg.map { String(format: "%.1f", $0) } ?? "—")
+                    .font(.system(size: 22, weight: .heavy, design: .rounded))
+                    .foregroundStyle(DS.Colors.novaColor(entry.novaAvg ?? 1))
+                    .monospacedDigit()
+                Text("NOVA Ø").font(.system(size: 9, weight: .bold)).foregroundStyle(DS.Colors.textFaint).tracking(0.8)
+            }
+            .frame(maxWidth: .infinity)
+        }
+        .padding(DS.Spacing.md)
+        .glassDefault()
+    }
+
+    @ViewBuilder
+    private var hrCard: some View {
+        VStack(alignment: .leading, spacing: DS.Spacing.sm) {
+            SectionHeader(icon: "heart.fill", title: "YOUR BODY'S RESPONSE", iconColor: DS.Colors.pink)
+            if hrLoading {
+                HStack(spacing: 8) { ProgressView().tint(DS.Colors.pink); Text("Reading your heart-rate response…").font(.system(size: 12)).foregroundStyle(DS.Colors.textMuted) }
+            } else if let hr, let note = strOf(hr["note"]) {
+                Text(note).font(.system(size: 13, weight: .medium)).foregroundStyle(DS.Colors.textPrimary).fixedSize(horizontal: false, vertical: true)
+                if let bump = dblOf(hr["adj_bump_bpm"]) {
+                    HStack(spacing: DS.Spacing.sm) {
+                        StatusChip(text: String(format: "%+.1f bpm", bump), style: bump >= 8 ? .amber : .teal)
+                        if let v = strOf(hr["verdict"]) {
+                            StatusChip(text: v == "clean" ? "clean read" : v.replacingOccurrences(of: "_", with: " "), style: v == "clean" ? .teal : .violet)
+                        }
+                    }
+                }
+            } else {
+                Text("Not enough heart-rate data around this meal yet. Wear the strap while resting after eating and this fills in — it shows how much this meal moved your HR (a rough glucose-response stand-in).")
+                    .font(.system(size: 12)).foregroundStyle(DS.Colors.textMuted).fixedSize(horizontal: false, vertical: true)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(DS.Spacing.md)
+        .glassDefault()
+    }
+
+    @ViewBuilder
+    private var itemsSection: some View {
+        if !entry.items.isEmpty {
+            VStack(alignment: .leading, spacing: DS.Spacing.sm) {
+                SectionHeader(icon: "list.bullet", title: "ITEMS", iconColor: DS.Colors.teal)
+                ForEach(entry.items) { item in itemRow(item) }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+    }
+
+    private func itemRow(_ item: DetectedItem) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack {
+                Text(item.name).font(.system(size: 14, weight: .semibold, design: .rounded)).foregroundStyle(DS.Colors.textPrimary)
+                Spacer()
+                if item.grams > 0 {
+                    Text("\(item.grams) g").font(.system(size: 11, weight: .medium, design: .monospaced)).foregroundStyle(DS.Colors.textFaint)
+                }
+                Text("\(item.kcal) kcal").font(.system(size: 11, weight: .semibold)).foregroundStyle(DS.Colors.amber)
+            }
+            HStack(spacing: DS.Spacing.sm) {
+                StatusChip(text: "NOVA \(item.novaClass)", style: item.novaClass >= 4 ? .danger : (item.novaClass >= 3 ? .amber : .teal))
+                if let q = item.quantityDescription, !q.isEmpty {
+                    Text(q).font(.system(size: 10)).foregroundStyle(DS.Colors.textMuted).lineLimit(1)
+                }
+                Spacer()
+                if let qc = item.quantityConfidence { Text(qc).font(.system(size: 9, weight: .semibold)).foregroundStyle(DS.Colors.textFaint) }
+            }
+            if let nr = item.novaReasoning, !nr.isEmpty {
+                Text(nr).font(.system(size: 10)).foregroundStyle(DS.Colors.textFaint).fixedSize(horizontal: false, vertical: true)
+            }
+            if !item.mindTags.isEmpty {
+                Text(item.mindTags.joined(separator: " · ")).font(.system(size: 10, weight: .medium)).foregroundStyle(DS.Colors.teal)
+            }
+        }
+        .padding(DS.Spacing.md)
+        .glassDefault()
+    }
+
+    private var methodNote: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text("HOW THIS WAS ESTIMATED").font(.system(size: 9, weight: .bold)).foregroundStyle(DS.Colors.textFaint).tracking(0.8)
+            Text(methodText).font(.system(size: 11)).foregroundStyle(DS.Colors.textMuted).fixedSize(horizontal: false, vertical: true)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(DS.Spacing.md)
+        .glassDefault()
+    }
+
+    private var methodText: String {
+        switch entry.source {
+        case "barcode": return "Read straight off the product label (Open Food Facts) — the most accurate source. Calories scale to the portion you logged."
+        case "photo": return "AI identified the foods from your photo and estimated portions using your body profile. Photo is great for what's on the plate; portion is the rough part — tap Edit to correct grams."
+        case "text", "manual": return "AI estimated this from your description + your body profile. Food identity is solid; portion is the main uncertainty — add grams in the description for a tighter number."
+        default: return "Quick-logged with a default estimate. Tap Edit to refine kcal or items."
+        }
+    }
+
+    private var editButton: some View {
+        Button { showEdit = true } label: {
+            Label("Edit this meal", systemImage: "square.and.pencil")
+                .font(.system(size: 14, weight: .semibold, design: .rounded))
+                .foregroundStyle(DS.Colors.violet)
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, DS.Spacing.md)
+                .background(Capsule().fill(DS.Colors.violet.opacity(0.12)).overlay(Capsule().stroke(DS.Colors.violet.opacity(0.3), lineWidth: 0.5)))
+        }
+        .buttonStyle(.plain)
     }
 }

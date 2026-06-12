@@ -944,18 +944,18 @@ private struct DevCard: View {
 /// `lucid_user_weight_kg`) so any engine can read it without a singleton.
 private struct PersonalizationCard: View {
     @AppStorage(PersonalizationCard.weightKey) private var weightKg: Double = 76.0
+    @AppStorage("lucid_user_height_cm") private var heightCm: Double = 178
+    @AppStorage("lucid_user_age") private var ageYears: Int = 20
     @State private var weightText: String = ""
-    @FocusState private var weightFocused: Bool
+    @State private var heightText: String = ""
+    @State private var ageText: String = ""
     @State private var savedFlash = false
 
     static let weightKey = "lucid_user_weight_kg"
 
-    // Mifflin-St Jeor BMR (male, age 20, ~178cm). Height is a fixed assumption
-    // for now — wire a real input when more profile fields land.
+    // Mifflin-St Jeor BMR — now uses your real height + age, not assumptions.
     private var bmr: Int {
-        let height: Double = 178
-        let age: Double = 20
-        let value = 10 * weightKg + 6.25 * height - 5 * age + 5
+        let value = 10 * weightKg + 6.25 * heightCm - 5 * Double(ageYears) + 5
         return Int(value.rounded())
     }
 
@@ -972,42 +972,20 @@ private struct PersonalizationCard: View {
                 iconColor: DS.Colors.violet
             )
 
-            HStack {
-                Text("Weight")
-                    .font(.system(size: 13, weight: .medium))
-                    .foregroundStyle(DS.Colors.textSecondary)
-                Spacer()
-                HStack(spacing: 4) {
-                    TextField("76.0", text: $weightText)
-                        .keyboardType(.decimalPad)
-                        .multilineTextAlignment(.trailing)
-                        .focused($weightFocused)
-                        .font(.system(size: 18, weight: .bold, design: .rounded))
-                        .foregroundStyle(DS.Colors.textPrimary)
-                        .frame(width: 70)
-                        .monospacedDigit()
-                        .onSubmit { commit() }
-                        .onChange(of: weightFocused) { _, focused in
-                            if !focused { commit() }
-                        }
-                    Text("kg")
-                        .font(.system(size: 13, weight: .medium))
-                        .foregroundStyle(DS.Colors.textMuted)
-                }
-            }
+            profileRow(label: "Weight", text: $weightText, unit: "kg",  placeholder: "76")
+            profileRow(label: "Height", text: $heightText, unit: "cm",  placeholder: "178")
+            profileRow(label: "Age",    text: $ageText,    unit: "yrs", placeholder: "20")
 
-            if savedFlash {
-                HStack(spacing: 4) {
-                    Image(systemName: "checkmark.circle.fill")
-                        .font(.system(size: 11))
-                        .foregroundStyle(DS.Colors.success)
-                    Text("Saved")
-                        .font(.system(size: 11, weight: .medium))
-                        .foregroundStyle(DS.Colors.success)
-                    Spacer()
-                }
-                .transition(.opacity)
+            Button { commit() } label: {
+                Text(savedFlash ? "Saved — the food AI now uses this" : "Save profile")
+                    .font(.system(size: 13, weight: .semibold, design: .rounded))
+                    .foregroundStyle(.white)
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 10)
+                    .background(Capsule().fill(savedFlash ? DS.Colors.success : DS.Colors.violet))
             }
+            .buttonStyle(.plain)
+            .padding(.top, 2)
 
             // Derived metrics — preview value of the input
             HStack(spacing: DS.Spacing.sm) {
@@ -1016,7 +994,7 @@ private struct PersonalizationCard: View {
             }
             .padding(.top, 2)
 
-            Text("Used by calorie targets, alcohol BAC estimate, and strain-per-kg.")
+            Text("Feeds calorie targets, alcohol BAC, strain-per-kg — and now the food AI's portion estimates. Sex assumed male; tell Lucid to change it.")
                 .font(.system(size: 10))
                 .foregroundStyle(DS.Colors.textMuted)
                 .padding(.top, 2)
@@ -1025,23 +1003,51 @@ private struct PersonalizationCard: View {
         .glassDefault()
         .onAppear {
             weightText = formatWeight(weightKg)
+            heightText = formatWeight(heightCm)
+            ageText = "\(ageYears)"
+            // Sync stored/seeded values to the server on open so the AI is current.
+            Task { await pushProfile() }
+        }
+    }
+
+    @ViewBuilder
+    private func profileRow(label: String, text: Binding<String>, unit: String, placeholder: String) -> some View {
+        HStack {
+            Text(label)
+                .font(.system(size: 13, weight: .medium))
+                .foregroundStyle(DS.Colors.textSecondary)
+            Spacer()
+            HStack(spacing: 4) {
+                TextField(placeholder, text: text)
+                    .keyboardType(.decimalPad)
+                    .multilineTextAlignment(.trailing)
+                    .font(.system(size: 18, weight: .bold, design: .rounded))
+                    .foregroundStyle(DS.Colors.textPrimary)
+                    .frame(width: 70)
+                    .monospacedDigit()
+                Text(unit)
+                    .font(.system(size: 13, weight: .medium))
+                    .foregroundStyle(DS.Colors.textMuted)
+            }
         }
     }
 
     private func commit() {
-        let cleaned = weightText
-            .replacingOccurrences(of: ",", with: ".")
-            .trimmingCharacters(in: .whitespaces)
-        guard let value = Double(cleaned), value >= 30, value <= 250 else {
-            weightText = formatWeight(weightKg)
-            return
-        }
-        weightKg = value
-        weightText = formatWeight(value)
+        if let w = Double(weightText.replacingOccurrences(of: ",", with: ".").trimmingCharacters(in: .whitespaces)), w >= 30, w <= 250 { weightKg = w }
+        if let h = Double(heightText.replacingOccurrences(of: ",", with: ".").trimmingCharacters(in: .whitespaces)), h >= 120, h <= 230 { heightCm = h }
+        if let a = Int(ageText.trimmingCharacters(in: .whitespaces)), a >= 10, a <= 120 { ageYears = a }
+        weightText = formatWeight(weightKg)
+        heightText = formatWeight(heightCm)
+        ageText = "\(ageYears)"
         withAnimation { savedFlash = true }
         DispatchQueue.main.asyncAfter(deadline: .now() + 2) {
             withAnimation { savedFlash = false }
         }
+        Task { await pushProfile() }
+    }
+
+    private func pushProfile() async {
+        await SupabaseClient.shared.saveBodyProfile(weightKg: weightKg, heightCm: heightCm, age: ageYears, sex: "male")
     }
 
     private func formatWeight(_ v: Double) -> String {
