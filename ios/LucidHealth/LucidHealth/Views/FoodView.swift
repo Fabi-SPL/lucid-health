@@ -82,6 +82,14 @@ struct FoodView: View {
                     .listRowBackground(Color.clear)
                     .listRowSeparator(.hidden)
 
+                    FavoritesBar { item in
+                        Task { await quickLog(item) }
+                    }
+                    .padding(.top, DS.Spacing.md)
+                    .listRowInsets(EdgeInsets())
+                    .listRowBackground(Color.clear)
+                    .listRowSeparator(.hidden)
+
                     if !todayEntries.isEmpty {
                         FoodQualityRow(entries: todayEntries)
                             .padding(.top, DS.Spacing.md)
@@ -309,6 +317,12 @@ struct FoodView: View {
         do {
             let saved = try await SupabaseClient.shared.saveQuickLog(item)
             entries.insert(saved, at: 0)
+            // Feed the shared "most used" ranking so this also becomes the
+            // Whoop double-tap favorite over time.
+            QuickLogHistory.shared.record(
+                name: item.name.lowercased(), displayName: item.name,
+                emoji: item.emoji, category: item.mirrorCategory, type: item.mirrorType
+            )
             saveSuccessCount += 1
         } catch {
             self.error = "Save failed"
@@ -374,6 +388,39 @@ private struct FilterChipRow: View {
             }
             .padding(.horizontal, DS.Spacing.md)
             .padding(.vertical, DS.Spacing.xs)
+        }
+    }
+}
+
+// MARK: - Favorites Bar (one-tap quick log, most-used first)
+
+private struct FavoritesBar: View {
+    @ObservedObject private var history = QuickLogHistory.shared
+    let onLog: (QuickLogItem) -> Void
+
+    /// Curated presets, re-sorted so the items you log most float to the front.
+    private var items: [QuickLogItem] {
+        let counts = Dictionary(history.entries.map { ($0.name, $0.count) }, uniquingKeysWith: { a, _ in a })
+        return QuickLogItem.defaults.sorted {
+            (counts[$0.name.lowercased()] ?? 0) > (counts[$1.name.lowercased()] ?? 0)
+        }
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: DS.Spacing.xs) {
+            Text("QUICK LOG")
+                .font(.system(size: 9, weight: .bold))
+                .foregroundStyle(DS.Colors.textFaint)
+                .tracking(1)
+                .padding(.horizontal, DS.Spacing.md)
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: DS.Spacing.sm) {
+                    ForEach(items) { item in
+                        QuickLogPill(item: item) { onLog(item) }
+                    }
+                }
+                .padding(.horizontal, DS.Spacing.md)
+            }
         }
     }
 }
