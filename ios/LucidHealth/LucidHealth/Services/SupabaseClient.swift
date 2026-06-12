@@ -2741,6 +2741,31 @@ extension SupabaseClient {
         return try await saveFoodEntry(entry)
     }
 
+    /// Build a DetectedItem from an Open Food Facts product WITHOUT saving —
+    /// used by the meal builder to add a barcoded ingredient to a draft.
+    func barcodeItem(from product: OpenFoodFactsProduct, grams: Int? = nil) -> DetectedItem {
+        let g = grams ?? product.servingSizeG ?? 100
+        let kcal = Int(((product.kcalPer100g ?? 0) * Double(g)) / 100.0)
+        return DetectedItem(name: product.productName ?? "Unknown", grams: g, kcal: kcal,
+                            novaClass: product.novaGroup ?? 4, mindTags: [])
+    }
+
+    /// Save a multi-source meal built from several items (barcode + described +
+    /// photo) as ONE food_entry (source "combined").
+    func saveCombinedMeal(items: [DetectedItem], caption: String) async throws -> FoodEntry {
+        let totalKcal = items.reduce(0) { $0 + $1.kcal }
+        let novaVals = items.map { Double($0.novaClass) }
+        let novaAvg = novaVals.isEmpty ? 1.0 : novaVals.reduce(0, +) / Double(novaVals.count)
+        let entry = FoodEntry(
+            id: nil, userId: userId, capturedAt: Date(), photoUrl: nil, geminiRawJson: nil,
+            items: items,
+            caption: caption.isEmpty ? items.map(\.name).joined(separator: ", ") : caption,
+            totalKcal: totalKcal, novaAvg: novaAvg, mindScore: nil,
+            confidence: "combined", source: "combined", createdAt: nil
+        )
+        return try await saveFoodEntry(entry)
+    }
+
     // MARK: - Recovery for Foods (renamed to avoid collision with Bridge's fetchLastScores)
 
     func fetchLatestRecoveryForFoods() async throws -> Double? {

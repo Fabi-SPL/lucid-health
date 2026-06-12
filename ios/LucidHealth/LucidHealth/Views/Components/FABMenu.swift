@@ -6,9 +6,14 @@ struct FABMenu: View {
     let onCamera: () -> Void
     let onBarcode: () -> Void
     let onManual: () -> Void
+    var onBuild: () -> Void = {}   // defaulted so TodayView's 3-option FAB still compiles
 
     var body: some View {
         VStack(alignment: .trailing, spacing: DS.Spacing.sm) {
+            FABMenuItem(icon: "square.stack.3d.up.fill", label: "Build meal", color: DS.Colors.pink) {
+                withAnimation(DS.Anim.quick) { isOpen = false }
+                onBuild()
+            }
             FABMenuItem(icon: "camera.fill",   label: "Photo",    color: DS.Colors.violet) {
                 withAnimation(DS.Anim.quick) { isOpen = false }
                 onCamera()
