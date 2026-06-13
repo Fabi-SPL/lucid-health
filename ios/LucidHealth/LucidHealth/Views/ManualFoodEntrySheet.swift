@@ -17,6 +17,7 @@ struct ManualFoodEntrySheet: View {
     @State private var geminiResult: GeminiFoodResult?
     @State private var estimate: MealEstimate?
     @State private var isEstimating = false
+    @State private var savePhase = "Saving…"
 
     @FocusState private var descriptionFocused: Bool
 
@@ -260,6 +261,7 @@ struct ManualFoodEntrySheet: View {
                 HStack {
                     if isSaving {
                         ProgressView().tint(.white)
+                        Text(savePhase)
                     } else {
                         Image(systemName: "checkmark")
                         Text("Save meal")
@@ -390,19 +392,36 @@ struct ManualFoodEntrySheet: View {
         isSaving = true
         error = nil
         Task {
-            // Auto-fill on Save if the user typed and saved without estimating.
-            // Uses the FREE server-side estimate (no Gemini quota) so a meal
-            // never lands as 0 kcal / 0 items. Best-effort: never blocks saving.
-            if geminiResult == nil && estimate == nil {
-                if let est = await supabase.estimateMealFromText(description), est.recognized {
-                    estimate = est
-                    if !est.items.isEmpty { items = est.items }
+            // ACCURACY FIX (German/donut bug): Save now routes through Gemini's
+            // text analysis FIRST — it understands German, portions, NOVA, and
+            // never confuses "Schokolade" for "Cola". The old keyword matcher
+            // (estimate_meal_from_text) is now ONLY an offline fallback when
+            // Gemini is unreachable/over-quota, and is flagged confidence
+            // "rough_text" so its log-quality score reflects the lower trust.
+            var usedRoughFallback = false
+            if geminiResult == nil {
+                savePhase = "Analyzing with AI…"
+                if let r = try? await gemini.analyzeFood(description: description) {
+                    geminiResult = r
+                    items = r.items
+                } else {
+                    // Gemini failed — record it, then fall back to the keyword estimate.
+                    supabase.logClientError(area: "manual_text.gemini_fallback",
+                                            message: "Gemini text analysis failed on Save; used keyword fallback",
+                                            context: String(description.prefix(200)))
+                    if estimate == nil, let est = await supabase.estimateMealFromText(description), est.recognized {
+                        estimate = est
+                        if !est.items.isEmpty { items = est.items }
+                    }
+                    usedRoughFallback = true
                 }
+                savePhase = "Saving…"
             }
             do {
                 let result = geminiResult
-                // Source: "text" when saved off the instant estimate, "manual" otherwise.
-                let usedTextEstimate = result == nil && estimate != nil
+                let confidence: String? = result?.confidence
+                    ?? (usedRoughFallback ? "rough_text" : estimate?.confidence)
+                let source = "manual"
                 let entry = FoodEntry(
                     id: nil,
                     userId: SupabaseClient.shared.userId,
@@ -414,9 +433,10 @@ struct ManualFoodEntrySheet: View {
                     totalKcal: result?.totalKcal ?? estimate?.kcal,
                     novaAvg: result?.novaAvg,
                     mindScore: result?.mindScore,
-                    confidence: result?.confidence ?? estimate?.confidence,
-                    source: usedTextEstimate ? "text" : "manual",
-                    createdAt: nil
+                    confidence: confidence,
+                    source: source,
+                    createdAt: nil,
+                    logQuality: FoodEntry.computeLogQuality(source: source, confidence: confidence, items: items)
                 )
 
                 let saved = try await supabase.saveFoodEntry(entry)
@@ -426,6 +446,9 @@ struct ManualFoodEntrySheet: View {
             } catch {
                 DS.Haptic.error()
                 self.error = error.localizedDescription
+                supabase.logClientError(area: "manual_text.save_failed",
+                                        message: error.localizedDescription,
+                                        context: String(description.prefix(200)))
             }
             isSaving = false
         }

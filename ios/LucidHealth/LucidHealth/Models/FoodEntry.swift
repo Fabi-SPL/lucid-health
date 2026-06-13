@@ -104,6 +104,7 @@ struct FoodEntry: Codable, Identifiable {
     var confidence: String?
     var source: String
     var createdAt: Date?
+    var logQuality: Int? = nil       // 1-10: how reliably this was logged (see computeLogQuality)
 
     enum CodingKeys: String, CodingKey {
         case id
@@ -119,5 +120,36 @@ struct FoodEntry: Codable, Identifiable {
         case confidence
         case source
         case createdAt = "created_at"
+        case logQuality = "log_quality"
+    }
+
+    /// Log-quality score 1-10 — how trustworthy the data behind this entry is,
+    /// based on HOW it was logged (method) + the analyzer's own confidence.
+    /// Barcode (label data) > combined > photo > AI-text > keyword-fallback.
+    static func computeLogQuality(source: String, confidence: String?, items: [DetectedItem]) -> Int {
+        let conf = (confidence ?? "").lowercased()
+        let hasGrams = items.contains { $0.grams > 0 }
+        switch source {
+        case "barcode":            return hasGrams ? 10 : 9
+        case "combined":           return hasGrams ? 8 : 7
+        case "photo":
+            if conf == "high"   { return 8 }
+            if conf == "low"    { return 6 }
+            return 7
+        case "manual", "text":
+            // keyword fallback (offline / Gemini down) is explicitly flagged
+            if conf == "rough_text" || conf == "estimate" || conf == "none" { return 3 }
+            if conf == "high"   { return 7 }
+            if conf == "medium" { return 6 }
+            if conf == "low"    { return 5 }
+            return 5
+        case "quick_tag", "quick_log": return 7
+        case "favorite":
+            // re-logging a curated saved meal — reliable; confidence only nudges it
+            if conf == "high" { return 8 }
+            if conf == "low"  { return 6 }
+            return 7
+        default:                       return 4
+        }
     }
 }

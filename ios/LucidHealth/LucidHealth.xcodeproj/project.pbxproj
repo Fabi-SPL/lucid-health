@@ -32,6 +32,7 @@
 		LH000018 /* RecoveryCopy.swift in Sources */ = {isa = PBXBuildFile; fileRef = LH100018; };
 		LH000019 /* DayState.swift in Sources */ = {isa = PBXBuildFile; fileRef = LH100019; };
 		LH00001A /* FoodEntry.swift in Sources */ = {isa = PBXBuildFile; fileRef = LH10001A; };
+		LH0000FA /* FoodFavorite.swift in Sources */ = {isa = PBXBuildFile; fileRef = LH1000FA; };
 		LH00001B /* QuickLogItem.swift in Sources */ = {isa = PBXBuildFile; fileRef = LH10001B; };
 		LH000040 /* HealthModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = LH100040; };
 		LH00001C /* GeminiClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = LH10001C; };
@@ -157,6 +158,7 @@
 		LH100018 /* RecoveryCopy.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RecoveryCopy.swift; sourceTree = "<group>"; };
 		LH100019 /* DayState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DayState.swift; sourceTree = "<group>"; };
 		LH10001A /* FoodEntry.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Models/FoodEntry.swift; sourceTree = "<group>"; };
+		LH1000FA /* FoodFavorite.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Models/FoodFavorite.swift; sourceTree = "<group>"; };
 		LH10001B /* QuickLogItem.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Models/QuickLogItem.swift; sourceTree = "<group>"; };
 		LH100040 /* HealthModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Models/HealthModels.swift; sourceTree = "<group>"; };
 		LH10001C /* GeminiClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Services/GeminiClient.swift; sourceTree = "<group>"; };
@@ -287,6 +289,7 @@
 				LH100018 /* RecoveryCopy.swift */,
 				LH100019 /* DayState.swift */,
 				LH10001A /* FoodEntry.swift */,
+				LH1000FA /* FoodFavorite.swift */,
 				LH10001B /* QuickLogItem.swift */,
 				LH10006F /* QuickLogHistory.swift */,
 				LH100074 /* LucidLog.swift */,
@@ -518,6 +521,7 @@
 				LH000018 /* RecoveryCopy.swift in Sources */,
 				LH000019 /* DayState.swift in Sources */,
 				LH00001A /* FoodEntry.swift in Sources */,
+				LH0000FA /* FoodFavorite.swift in Sources */,
 				LH00001B /* QuickLogItem.swift in Sources */,
 				LH00006F /* QuickLogHistory.swift in Sources */,
 				LH000074 /* LucidLog.swift in Sources */,

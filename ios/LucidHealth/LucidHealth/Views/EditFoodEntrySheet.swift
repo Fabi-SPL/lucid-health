@@ -215,7 +215,8 @@ struct EditFoodEntrySheet: View {
                     mindScore: mindScore,
                     confidence: original.confidence,
                     source: original.source,
-                    createdAt: original.createdAt
+                    createdAt: original.createdAt,
+                    logQuality: original.logQuality
                 )
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) {
                     onSaved(updated)

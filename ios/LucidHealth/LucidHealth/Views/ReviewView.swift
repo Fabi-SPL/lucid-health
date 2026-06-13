@@ -6,6 +6,7 @@ struct ReviewView: View {
     @Environment(\.dismiss) private var dismiss
 
     @State private var caption: String = ""
+    @State private var eatenAt: Date = Date()
     @State private var items: [DetectedItem] = []
     @State private var isAnalyzing = false
     @State private var isSaving = false
@@ -35,6 +36,10 @@ struct ReviewView: View {
 
                     // Caption ALWAYS visible — user can add context BEFORE analysis
                     captionCard
+
+                    // When did you eat it — backdating sets captured_at so the
+                    // post-meal HR/HRV analysis reads the CORRECT time window.
+                    timeCard
 
                     if isAnalyzing {
                         analyzingCard
@@ -101,6 +106,45 @@ struct ReviewView: View {
         }
         .glassCard()
         .padding(.horizontal, DS.Spacing.md)
+    }
+
+    private var timeCard: some View {
+        VStack(alignment: .leading, spacing: DS.Spacing.xs) {
+            Text("WHEN DID YOU EAT IT?")
+                .font(DS.Font.label)
+                .foregroundStyle(DS.Colors.textMuted)
+                .tracking(0.8)
+            DatePicker("", selection: $eatenAt, in: ...Date(),
+                       displayedComponents: [.date, .hourAndMinute])
+                .datePickerStyle(.compact)
+                .labelsHidden()
+                .tint(DS.Colors.violet)
+
+            HStack(spacing: DS.Spacing.xs) {
+                reviewTimeChip("Now") { eatenAt = Date() }
+                reviewTimeChip("1h ago") { eatenAt = Date().addingTimeInterval(-3600) }
+                reviewTimeChip("2h ago") { eatenAt = Date().addingTimeInterval(-7200) }
+            }
+            .padding(.top, 4)
+        }
+        .glassCard()
+        .padding(.horizontal, DS.Spacing.md)
+    }
+
+    private func reviewTimeChip(_ label: String, action: @escaping () -> Void) -> some View {
+        Button(action: { DS.Haptic.tap(); action() }) {
+            Text(label)
+                .font(.system(size: 11, weight: .semibold, design: .rounded))
+                .foregroundStyle(DS.Colors.violet)
+                .padding(.horizontal, 10)
+                .padding(.vertical, 6)
+                .background(
+                    Capsule()
+                        .fill(DS.Colors.violet.opacity(0.12))
+                        .overlay(Capsule().stroke(DS.Colors.violet.opacity(0.25), lineWidth: 0.5))
+                )
+        }
+        .buttonStyle(.plain)
     }
 
     private var analyzingCard: some View {
@@ -200,12 +244,17 @@ struct ReviewView: View {
                 // photoUrl = nil. (Was: try await → threw → meal never saved.)
                 step = "uploading photo (optional)"
                 let photoUrl = try? await supabase.uploadFoodPhoto(jpeg, filename: filename)
+                if photoUrl == nil {
+                    supabase.logClientError(area: "photo.upload_failed",
+                                            message: "Photo upload returned nil; saved entry without photo",
+                                            context: filename)
+                }
 
                 let result = geminiResult
                 let entry = FoodEntry(
                     id: nil,
                     userId: SupabaseClient.shared.userId,
-                    capturedAt: Date(),
+                    capturedAt: eatenAt,
                     photoUrl: photoUrl,
                     geminiRawJson: result?.notes,
                     items: items,
@@ -215,7 +264,8 @@ struct ReviewView: View {
                     mindScore: result?.mindScore,
                     confidence: result?.confidence,
                     source: "photo",
-                    createdAt: nil
+                    createdAt: nil,
+                    logQuality: FoodEntry.computeLogQuality(source: "photo", confidence: result?.confidence, items: items)
                 )
 
                 step = "inserting food_entries row"
@@ -224,6 +274,9 @@ struct ReviewView: View {
                 dismiss()
             } catch {
                 self.error = "Failed \(step): \(error.localizedDescription)"
+                supabase.logClientError(area: "photo.save_failed",
+                                        message: "\(step): \(error.localizedDescription)",
+                                        context: caption.isEmpty ? nil : String(caption.prefix(200)))
             }
             isSaving = false
         }
