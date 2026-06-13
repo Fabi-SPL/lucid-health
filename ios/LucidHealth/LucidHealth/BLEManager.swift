@@ -875,6 +875,12 @@ class BLEManager: NSObject, ObservableObject {
     private func runConnectionSequence() {
         guard let char = cmdToStrap, let p = peripheral else { return }
 
+        // v138: anchor "when did this connection start?" at the top of the
+        // sequence. The gap-check scopes the server cursor to rows older than
+        // this, so handshake-window packets (stamped now() by the DB) can't
+        // poison the staleness read. Captured by value into the +2.5s closure.
+        let connectStart = Date()
+
         log("Step 1: Requesting battery...")
         p.writeValue(WhoopProtocol.batteryPacket(), for: char, type: .withResponse)
 
@@ -905,52 +911,88 @@ class BLEManager: NSObject, ObservableObject {
         bleQueue.asyncAfter(deadline: .now() + 2.5) { [weak self] in
             guard let self, let _ = self.peripheral, let _ = self.cmdToStrap else { return }
 
-            // Check if there's a gap — if so, download history first.
-            // v97: log decision to bridge_logs so we can audit why auto-backfill
-            // did/didn't fire on past reconnects (e.g. May 7 silent miss).
-            let lastSync = self.getLastSyncTimestamp()
-            let gap = Date().timeIntervalSince(lastSync)
-            let gapMinutes = Int(gap / 60)
-
-            // v104 SHADOW MODE — compute the server-held cursor's verdict in
-            // parallel and log disagreement. NO behaviour change. After 7 days
-            // of clean disagreement logs, this becomes the authoritative path
-            // and the UserDefaults.lastSync code deletes.
+            // v138: SERVER-AUTHORITATIVE + FAIL-SAFE gap detection.
             //
-            // See research_report_20260521_whoop_ble_backfill.md §4.6 Phase 2.
+            // Invariant: "every gap is permanent UNTIL the server PROVES recent
+            // data." We skip backfill ONLY when the server can show a live
+            // whoop_ble sample, captured BEFORE this connection, that is <=1 min
+            // old. Every other path — no proof, first sync, cursor fetch failed —
+            // downloads the strap buffer. The download is minute-deduped against
+            // realtime_health (fetchMinutesWithData) and pushes real strap
+            // timestamps, so an unnecessary re-download is cheap and idempotent,
+            // while a silent SKIP is the exact regression that bit us on May 7 /
+            // May 21 / Jun 13. Over-fetch beats under-fetch, always.
+            //
+            // The cursor is scoped to recorded_at < connectStart (handshake
+            // packets get stamped now() and would otherwise look like fresh data).
+            // The local UserDefaults timestamp is NO LONGER in the decision — it
+            // is kept only in the shadow log as an audit of the old logic.
             let deviceId = self.peripheral?.identifier.uuidString ?? "unknown"
-            let clientDecision: String = gapMinutes > 1 ? "download" : "skip"
+            let localLastSync = self.getLastSyncTimestamp()
+            let localGapMin = Int(Date().timeIntervalSince(localLastSync) / 60)
+            // Strap holds ~72h; on any "we can't prove freshness" path we pull the
+            // whole buffer and let minute-dedup discard what's already covered.
+            let fullBufferStart = Date().addingTimeInterval(-72 * 3600)
+
             Task { [weak self] in
                 guard let self else { return }
-                let cursor = await self.supabase.fetchSyncCursor(deviceId: deviceId)
+                let cursor = await self.supabase.fetchSyncCursor(before: connectStart)
                 let serverMins = cursor?.minutesSinceLast
-                let serverDecision: String = {
-                    guard let cursor else { return "fetch_failed" }
-                    // First-sync (no rows yet) → backfill is correct
-                    if cursor.lastSeq == nil { return "backfill_first_sync" }
-                    // Otherwise: backfill if >1 min stale, mirroring legacy threshold
-                    if let m = serverMins, m > 1 { return "backfill" }
-                    return "skip"
-                }()
-                let agree = (clientDecision == "skip"     && serverDecision == "skip")
-                         || (clientDecision == "download" && (serverDecision == "backfill" || serverDecision == "backfill_first_sync"))
+
+                // Resolve the authoritative decision + the backfill start boundary.
+                let usedSource: String
+                let willDownload: Bool
+                let gapMinutes: Int
+                let gapStart: Date
+                if let cursor, let mins = serverMins, let lastAt = cursor.lastRecordedAt {
+                    // Server PROVED a pre-connect live sample. Skip only if fresh.
+                    usedSource = "server"
+                    gapMinutes = Int(mins)
+                    willDownload = mins > 1
+                    gapStart = lastAt
+                } else if cursor != nil {
+                    // Fetched OK but no live rows before connect = genuine first
+                    // sync (or strap offline past retention). Pull the full buffer.
+                    usedSource = "server_first_sync"
+                    gapMinutes = Int(Date().timeIntervalSince(fullBufferStart) / 60)
+                    willDownload = true
+                    gapStart = fullBufferStart
+                } else {
+                    // FAIL-SAFE: cursor fetch failed (offline / captive wifi / 5xx —
+                    // the exact 6am-reconnect scenario). NEVER silently skip.
+                    usedSource = "cursor_unavailable_failsafe"
+                    gapMinutes = Int(Date().timeIntervalSince(fullBufferStart) / 60)
+                    willDownload = true
+                    gapStart = fullBufferStart
+                }
+
+                // Shadow audit: would the legacy local-timestamp logic have skipped
+                // here? A `disagree` with client=skip is precisely the silent miss
+                // the old code shipped — surfaced now instead of swallowed.
+                let clientDecision = localGapMin > 1 ? "download" : "skip"
+                let serverDecision = willDownload ? "download" : "skip"
+                let agree = clientDecision == serverDecision
                 self.supabase.pushDebugLog(
                     key: "history_sync_shadow",
-                    value: "agree=\(agree) client=\(clientDecision) server=\(serverDecision) "
-                         + "client_gap_min=\(gapMinutes) server_mins=\(serverMins.map{ String(format: "%.1f", $0) } ?? "nil") "
+                    value: "agree=\(agree) used=\(usedSource) client=\(clientDecision) server=\(serverDecision) "
+                         + "client_gap_min=\(localGapMin) server_mins=\(serverMins.map{ String(format: "%.1f", $0) } ?? "nil") "
                          + "device_id=\(deviceId.prefix(8))"
                 )
-            }
+                self.supabase.pushDebugLog(
+                    key: "history_sync_gap_check",
+                    value: "decision=\(willDownload ? "download" : "skip") gap_min=\(gapMinutes) source=\(usedSource) gap_start=\(Int(gapStart.timeIntervalSince1970))"
+                )
 
-            if gapMinutes > 1 {
-                self.log("GAP DETECTED: \(gapMinutes) min since last sync")
-                self.supabase.pushDebugLog(key: "history_sync_gap_check", value: "decision=download gap_min=\(gapMinutes) last_sync=\(Int(lastSync.timeIntervalSince1970))")
-                self.log("Step 4: Downloading strap history buffer...")
-                self.startHistoryDownload()
-            } else {
-                self.log("Step 4: No gap (\(gapMinutes) min) — starting realtime HR...")
-                self.supabase.pushDebugLog(key: "history_sync_gap_check", value: "decision=skip gap_min=\(gapMinutes) last_sync=\(Int(lastSync.timeIntervalSince1970))")
-                self.startRealtimeStreaming()
+                self.bleQueue.async { [weak self] in
+                    guard let self, self.peripheral != nil, self.cmdToStrap != nil else { return }
+                    if willDownload {
+                        self.log("GAP/BACKFILL (\(usedSource)): \(gapMinutes) min — downloading history")
+                        self.startHistoryDownload(overrideGapStart: gapStart)
+                    } else {
+                        self.log("No gap (\(usedSource), \(gapMinutes) min) — starting realtime HR...")
+                        self.startRealtimeStreaming()
+                    }
+                }
             }
         }
     }
@@ -1213,7 +1255,7 @@ class BLEManager: NSObject, ObservableObject {
         log("History request (bare CMD 22) sent [\(trigger)] — waiting for strap…")
     }
 
-    private func startHistoryDownload() {
+    private func startHistoryDownload(overrideGapStart: Date? = nil) {
         guard peripheral != nil, cmdToStrap != nil else {
             log("History download skipped — no peripheral/char")
             startRealtimeStreaming()
@@ -1222,7 +1264,9 @@ class BLEManager: NSObject, ObservableObject {
 
         // Record gap boundaries — used for both timestamp validation
         // and as the dedup window when fetching existing minutes.
-        gapStartTime = getLastSyncTimestamp()
+        // v137: prefer the server-derived gap start (last MAX(recorded_at)) when the
+        // caller resolved one; the local timestamp is the offline fallback only.
+        gapStartTime = overrideGapStart ?? getLastSyncTimestamp()
         gapEndTime = Date()
         let gapMinutes = Int(gapEndTime.timeIntervalSince(gapStartTime) / 60)
         log("Gap: \(gapMinutes) min (\(gapStartTime) → \(gapEndTime))")
@@ -4025,7 +4069,11 @@ extension BLEManager: CBPeripheralDelegate {
                 }
 
                 pendingReadings.append(reading)
-                saveLastSyncTimestamp()
+                // v138: do NOT save the last-sync timestamp on every packet. That
+                // per-tick write was the clobber that drove gap_min=0 — on reconnect
+                // it had already advanced to ~now, so the gap-check saw no gap and
+                // skipped backfill. The timestamp is now saved only where it means
+                // "we are caught up": history-download completion + clean disconnect.
                 lastDataReceived = Date()  // Watchdog: mark data alive
 
                 // v70 — TYPE-40 RAW CAPTURE.
