@@ -2836,15 +2836,39 @@ extension SupabaseClient {
         let minutesSinceLast: Double?  // nil if no rows ever
     }
 
-    func fetchSyncCursor(deviceId: String) async -> BLESyncCursor? {
+    /// Latest LIVE BLE sample (`source = 'whoop_ble'`) recorded STRICTLY BEFORE
+    /// `before` (the moment this connection started).
+    ///
+    /// v138 — why this no longer reads `v_ble_sync_cursor`, and why the `before`
+    /// cutoff is load-bearing:
+    ///   pushReading() sends no `recorded_at`, so the DB stamps now() on insert.
+    ///   A single stray HR packet during the 2.5-3.5s reconnect handshake window
+    ///   therefore lands a row at recorded_at ≈ now — which would poison
+    ///   MAX(recorded_at) and make a real 7h overnight gap look 0 min old (the
+    ///   exact silent-skip regression: May 7 / May 21 / Jun 13).
+    ///   Only data captured BEFORE we connected can answer "how stale were we when
+    ///   we reconnected?", so we query realtime_health directly with
+    ///   recorded_at < before. We also scope to source='whoop_ble' (live stream)
+    ///   so recovered backfill/history rows from a PRIOR gap-fill can't mask the
+    ///   true live-stream boundary; the minute-level dedup on download makes the
+    ///   resulting conservative re-check cheap.
+    ///   `minutes_since_last` is computed client-side (now − server sample); only
+    ///   the STORED last-sync timestamp is untrustworthy, the wall clock is fine.
+    func fetchSyncCursor(before: Date) async -> BLESyncCursor? {
         do {
             try await ensureAuth()
             guard accessToken != nil else { return nil }
-            var comps = URLComponents(string: "\(baseURL)/rest/v1/v_ble_sync_cursor")!
+            let iso = ISO8601DateFormatter()
+            iso.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+            let beforeStr = iso.string(from: before)
+            var comps = URLComponents(string: "\(baseURL)/rest/v1/realtime_health")!
             comps.queryItems = [
                 URLQueryItem(name: "user_id", value: "eq.\(userId)"),
-                URLQueryItem(name: "device_id", value: "eq.\(deviceId)"),
-                URLQueryItem(name: "select", value: "last_seq,last_recorded_at,minutes_since_last"),
+                URLQueryItem(name: "source", value: "eq.whoop_ble"),
+                URLQueryItem(name: "heart_rate", value: "gt.20"),
+                URLQueryItem(name: "recorded_at", value: "lt.\(beforeStr)"),
+                URLQueryItem(name: "select", value: "recorded_at,device_seq"),
+                URLQueryItem(name: "order", value: "recorded_at.desc"),
                 URLQueryItem(name: "limit", value: "1")
             ]
             var req = URLRequest(url: comps.url!)
@@ -2854,20 +2878,21 @@ extension SupabaseClient {
             guard ((response as? HTTPURLResponse)?.statusCode ?? 0) < 300 else { return nil }
             guard let arr = try? JSONSerialization.jsonObject(with: data) as? [[String: Any]],
                   let row = arr.first else {
-                // No rows for this device_id yet (first sync) — return a cursor
-                // with all nils so caller knows to backfill from scratch.
+                // HTTP OK but no live rows before connect time = genuine first sync
+                // (or strap offline longer than retention). nil fields tell the
+                // caller "backfill from scratch", never "skip".
                 return BLESyncCursor(lastSeq: nil, lastRecordedAt: nil, minutesSinceLast: nil)
             }
-            let lastSeq = (row["last_seq"] as? NSNumber)?.int64Value
+            let lastSeq = (row["device_seq"] as? NSNumber)?.int64Value
             let lastRecordedAt: Date? = {
-                guard let s = row["last_recorded_at"] as? String else { return nil }
-                let iso = ISO8601DateFormatter()
-                iso.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-                if let d = iso.date(from: s) { return d }
-                iso.formatOptions = [.withInternetDateTime]
-                return iso.date(from: s)
+                guard let s = row["recorded_at"] as? String else { return nil }
+                let f = ISO8601DateFormatter()
+                f.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+                if let d = f.date(from: s) { return d }
+                f.formatOptions = [.withInternetDateTime]
+                return f.date(from: s)
             }()
-            let mins = (row["minutes_since_last"] as? NSNumber)?.doubleValue
+            let mins: Double? = lastRecordedAt.map { Date().timeIntervalSince($0) / 60.0 }
             return BLESyncCursor(lastSeq: lastSeq, lastRecordedAt: lastRecordedAt, minutesSinceLast: mins)
         } catch {
             return nil
