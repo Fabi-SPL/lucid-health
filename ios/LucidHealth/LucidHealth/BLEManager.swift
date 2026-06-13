@@ -3112,7 +3112,8 @@ extension BLEManager: CBPeripheralDelegate {
             mindScore: nil,
             confidence: "quick_tag",
             source: "quick_tag",
-            createdAt: nil
+            createdAt: nil,
+            logQuality: FoodEntry.computeLogQuality(source: "quick_tag", confidence: "quick_tag", items: [item])
         )
         do {
             _ = try await supabase.saveFoodEntry(entry)

@@ -9,6 +9,7 @@ import PhotosUI
 struct FoodView: View {
     @EnvironmentObject private var bleManager: BLEManager
     @State private var entries: [FoodEntry] = []
+    @State private var favorites: [FoodFavorite] = []
     @State private var isLoading = false
     @State private var error: String?
     @State private var filter: FoodFilter = .all
@@ -85,9 +86,11 @@ struct FoodView: View {
                     .listRowBackground(Color.clear)
                     .listRowSeparator(.hidden)
 
-                    FavoritesBar { item in
-                        Task { await quickLog(item) }
-                    }
+                    FavoritesBar(
+                        favorites: favorites,
+                        onLog: { item in Task { await quickLog(item) } },
+                        onLogFavorite: { fav in Task { await logFavorite(fav) } }
+                    )
                     .padding(.top, DS.Spacing.md)
                     .listRowInsets(EdgeInsets())
                     .listRowBackground(Color.clear)
@@ -179,6 +182,7 @@ struct FoodView: View {
         }
         .task {
             await loadEntries()
+            await loadFavorites()
             withAnimation { appeared = true }
         }
         .sensoryFeedback(.success, trigger: saveSuccessCount)
@@ -282,6 +286,11 @@ struct FoodView: View {
                             }
                             .contextMenu {
                                 Button {
+                                    Task { await saveAsFavorite(entry) }
+                                } label: {
+                                    Label("Save as favorite", systemImage: "star")
+                                }
+                                Button {
                                     editing = entry
                                 } label: {
                                     Label("Edit", systemImage: "square.and.pencil")
@@ -343,6 +352,37 @@ struct FoodView: View {
             saveSuccessCount += 1
         } catch {
             self.error = "Save failed"
+            saveErrorCount += 1
+        }
+    }
+
+    private func loadFavorites() async {
+        if let favs = try? await SupabaseClient.shared.fetchFavorites() {
+            favorites = favs
+        }
+    }
+
+    private func logFavorite(_ fav: FoodFavorite) async {
+        do {
+            let saved = try await SupabaseClient.shared.logFromFavorite(fav)
+            entries.insert(saved, at: 0)
+            saveSuccessCount += 1
+        } catch {
+            self.error = "Save failed"
+            saveErrorCount += 1
+        }
+    }
+
+    private func saveAsFavorite(_ entry: FoodEntry) async {
+        let trimmed = entry.caption?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let name = trimmed.isEmpty ? entry.items.map(\.name).joined(separator: ", ") : trimmed
+        guard !name.isEmpty else { return }
+        do {
+            try await SupabaseClient.shared.saveFavorite(from: entry, name: name)
+            await loadFavorites()
+            saveSuccessCount += 1
+        } catch {
+            self.error = "Couldn't save favorite"
             saveErrorCount += 1
         }
     }
@@ -413,7 +453,9 @@ private struct FilterChipRow: View {
 
 private struct FavoritesBar: View {
     @ObservedObject private var history = QuickLogHistory.shared
+    let favorites: [FoodFavorite]
     let onLog: (QuickLogItem) -> Void
+    let onLogFavorite: (FoodFavorite) -> Void
 
     /// Curated presets, re-sorted so the items you log most float to the front.
     private var items: [QuickLogItem] {
@@ -432,6 +474,10 @@ private struct FavoritesBar: View {
                 .padding(.horizontal, DS.Spacing.md)
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: DS.Spacing.sm) {
+                    // User's saved meals first (violet-tinted), then curated presets.
+                    ForEach(favorites) { fav in
+                        FavoritePill(favorite: fav) { onLogFavorite(fav) }
+                    }
                     ForEach(items) { item in
                         QuickLogPill(item: item) { onLog(item) }
                     }
@@ -439,6 +485,64 @@ private struct FavoritesBar: View {
                 .padding(.horizontal, DS.Spacing.md)
             }
         }
+    }
+}
+
+/// Tap-to-log pill for a user FoodFavorite (emoji + name + kcal). Violet-tinted to
+/// distinguish saved meals from the curated single-item quick presets.
+private struct FavoritePill: View {
+    let favorite: FoodFavorite
+    let onTap: () -> Void
+
+    @State private var isPressed = false
+    @State private var didLog = false
+
+    var body: some View {
+        Button {
+            UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+            withAnimation(DS.Anim.quick) { didLog = true }
+            onTap()
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) {
+                withAnimation(DS.Anim.quick) { didLog = false }
+            }
+        } label: {
+            HStack(spacing: 6) {
+                Text(favorite.emoji ?? "🍽️")
+                    .font(.system(size: 14))
+                Text(favorite.name)
+                    .font(.system(size: 13, weight: .medium, design: .rounded))
+                    .foregroundStyle(didLog ? DS.Colors.teal : DS.Colors.textPrimary)
+                    .lineLimit(1)
+                if let k = favorite.totalKcal, k > 0 {
+                    Text("\(k)")
+                        .font(.system(size: 10, weight: .semibold, design: .monospaced))
+                        .foregroundStyle(DS.Colors.textFaint)
+                }
+            }
+            .padding(.horizontal, DS.Spacing.md)
+            .padding(.vertical, DS.Spacing.sm)
+            .background(
+                Capsule()
+                    .fill(didLog
+                          ? DS.Colors.teal.opacity(0.15)
+                          : DS.Colors.violet.opacity(0.10))
+                    .overlay(
+                        Capsule()
+                            .stroke(
+                                didLog ? DS.Colors.teal.opacity(0.4) : DS.Colors.borderViolet,
+                                lineWidth: 0.5
+                            )
+                    )
+            )
+            .scaleEffect(isPressed ? 0.95 : (didLog ? 1.03 : 1.0))
+        }
+        .buttonStyle(.plain)
+        .simultaneousGesture(
+            DragGesture(minimumDistance: 0)
+                .onChanged { _ in withAnimation(DS.Anim.quick) { isPressed = true } }
+                .onEnded   { _ in withAnimation(DS.Anim.quick) { isPressed = false } }
+        )
+        .animation(DS.Anim.quick, value: didLog)
     }
 }
 
@@ -541,6 +645,17 @@ private struct EnhancedMealCard: View {
         return "Minimal"
     }
 
+    private var logQuality: Int {
+        entry.logQuality ?? FoodEntry.computeLogQuality(source: entry.source, confidence: entry.confidence, items: entry.items)
+    }
+    private var logQualityStyle: StatusChipStyle {
+        switch logQuality {
+        case 8...10: return .teal
+        case 5...7:  return .amber
+        default:     return .danger
+        }
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: DS.Spacing.sm) {
             HStack(spacing: DS.Spacing.sm) {
@@ -580,6 +695,8 @@ private struct EnhancedMealCard: View {
                 }
 
                 Spacer()
+
+                StatusChip(text: "Q\(logQuality)", style: logQualityStyle)
             }
         }
         .padding(DS.Spacing.md)
@@ -707,8 +824,32 @@ private struct FoodDetailView: View {
     private var carbs: Double? { dblOf(mealTotals?["carbs_g_estimate"]) ?? macroSum { $0.carbsG } }
     private var fat: Double? { dblOf(mealTotals?["fat_g_estimate"]) ?? macroSum { $0.fatG } }
     private var fiber: Double? { dblOf(mealTotals?["fiber_g_estimate"]) ?? macroSum { $0.fiberG } }
-    private var brainScore: Int? { entry.mindScore ?? intOf(brain?["total"]) }
-    private var confidence: String { entry.confidence ?? strOf(mealTotals?["confidence_level"]) ?? "—" }
+    private var brainScore: Int? {
+        // Defensive clamp 0-10 — Gemini occasionally returns an unclamped total (e.g. 56).
+        guard let s = entry.mindScore ?? intOf(brain?["total"]) else { return nil }
+        return min(10, max(0, s))
+    }
+    private var confidence: String {
+        let c = entry.confidence ?? strOf(mealTotals?["confidence_level"]) ?? "—"
+        switch c {
+        case "rough_text", "estimate": return "rough estimate"
+        case "barcode": return "label data"
+        case "quick_log", "quick_tag": return "quick log"
+        default: return c
+        }
+    }
+
+    /// Log-quality 1-10 — stored on the row; computed on the fly for older rows.
+    private var logQuality: Int {
+        entry.logQuality ?? FoodEntry.computeLogQuality(source: entry.source, confidence: entry.confidence, items: entry.items)
+    }
+    private var logQualityColor: Color {
+        switch logQuality {
+        case 8...10: return DS.Colors.success
+        case 5...7:  return DS.Colors.amber
+        default:     return DS.Colors.danger
+        }
+    }
 
     private var sourceLabel: String {
         switch entry.source {
@@ -843,6 +984,15 @@ private struct FoodDetailView: View {
                 Text("NOVA Ø").font(.system(size: 9, weight: .bold)).foregroundStyle(DS.Colors.textFaint).tracking(0.8)
             }
             .frame(maxWidth: .infinity)
+            Divider().frame(height: 30)
+            VStack(spacing: 2) {
+                Text("\(logQuality)")
+                    .font(.system(size: 22, weight: .heavy, design: .rounded))
+                    .foregroundStyle(logQualityColor)
+                    .monospacedDigit()
+                Text("LOG Q").font(.system(size: 9, weight: .bold)).foregroundStyle(DS.Colors.textFaint).tracking(0.8)
+            }
+            .frame(maxWidth: .infinity)
         }
         .padding(DS.Spacing.md)
         .glassDefault()
@@ -925,11 +1075,17 @@ private struct FoodDetailView: View {
     }
 
     private var methodText: String {
+        let qualityLine = " · Log quality \(logQuality)/10 reflects how this was captured."
         switch entry.source {
-        case "barcode": return "Read straight off the product label (Open Food Facts) — the most accurate source. Calories scale to the portion you logged."
-        case "photo": return "AI identified the foods from your photo and estimated portions using your body profile. Photo is great for what's on the plate; portion is the rough part — tap Edit to correct grams."
-        case "text", "manual": return "AI estimated this from your description + your body profile. Food identity is solid; portion is the main uncertainty — add grams in the description for a tighter number."
-        default: return "Quick-logged with a default estimate. Tap Edit to refine kcal or items."
+        case "barcode": return "Read straight off the product label (Open Food Facts) — the most accurate source. Calories scale to the portion you logged." + qualityLine
+        case "combined": return "Built from multiple sources (barcode + photo + description). Barcoded items are label-exact; the rest are AI estimates." + qualityLine
+        case "photo": return "AI identified the foods from your photo and estimated portions using your body profile. Photo is great for what's on the plate; portion is the rough part — tap Edit to correct grams." + qualityLine
+        case "text", "manual":
+            if (entry.confidence ?? "") == "rough_text" || (entry.confidence ?? "") == "estimate" {
+                return "Estimated by a quick keyword match (AI was unavailable). Numbers are rough — re-open and tap Deep analysis for an accurate read." + qualityLine
+            }
+            return "AI estimated this from your description + your body profile. Food identity is solid; portion is the main uncertainty — add grams in the description for a tighter number." + qualityLine
+        default: return "Quick-logged with a default estimate. Tap Edit to refine kcal or items." + qualityLine
         }
     }
 
@@ -953,6 +1109,7 @@ private struct MealBuilderSheet: View {
     @Environment(\.dismiss) private var dismiss
 
     @State private var caption = ""
+    @State private var eatenAt = Date()
     @State private var items: [DetectedItem] = []
     @State private var describeText = ""
     @State private var isAnalyzing = false
@@ -973,7 +1130,7 @@ private struct MealBuilderSheet: View {
                     addRow
                     describeCard
                     if isAnalyzing { analyzingBanner }
-                    if !items.isEmpty { draftCard }
+                    if !items.isEmpty { draftCard; timeCard }
                     if let error {
                         AlertBanner(icon: "exclamationmark.triangle", message: error, color: DS.Colors.pink)
                     }
@@ -1089,6 +1246,35 @@ private struct MealBuilderSheet: View {
         .padding(DS.Spacing.md).glassDefault()
     }
 
+    private var timeCard: some View {
+        VStack(alignment: .leading, spacing: DS.Spacing.sm) {
+            SectionHeader(icon: "clock", title: "WHEN DID YOU EAT IT?", iconColor: DS.Colors.violet)
+            DatePicker("", selection: $eatenAt, in: ...Date(),
+                       displayedComponents: [.date, .hourAndMinute])
+                .datePickerStyle(.compact)
+                .labelsHidden()
+                .tint(DS.Colors.violet)
+            HStack(spacing: DS.Spacing.xs) {
+                builderTimeChip("Now") { eatenAt = Date() }
+                builderTimeChip("1h ago") { eatenAt = Date().addingTimeInterval(-3600) }
+                builderTimeChip("2h ago") { eatenAt = Date().addingTimeInterval(-7200) }
+            }
+        }
+        .padding(DS.Spacing.md).glassDefault()
+    }
+
+    private func builderTimeChip(_ label: String, action: @escaping () -> Void) -> some View {
+        Button(action: { DS.Haptic.tap(); action() }) {
+            Text(label)
+                .font(.system(size: 11, weight: .semibold, design: .rounded))
+                .foregroundStyle(DS.Colors.violet)
+                .padding(.horizontal, 10).padding(.vertical, 6)
+                .background(Capsule().fill(DS.Colors.violet.opacity(0.12))
+                    .overlay(Capsule().stroke(DS.Colors.violet.opacity(0.25), lineWidth: 0.5)))
+        }
+        .buttonStyle(.plain)
+    }
+
     private var saveButton: some View {
         Button { Task { await save() } } label: {
             HStack {
@@ -1116,6 +1302,9 @@ private struct MealBuilderSheet: View {
             describeText = ""
         } else {
             error = "Couldn't analyze that — try simpler wording."
+            SupabaseClient.shared.logClientError(area: "builder.analyze_text_failed",
+                                                 message: "Gemini text analysis returned nil in meal builder",
+                                                 context: String(t.prefix(200)))
         }
         isAnalyzing = false; analyzingLabel = ""
     }
@@ -1125,7 +1314,17 @@ private struct MealBuilderSheet: View {
         if let data = try? await pick.loadTransferable(type: Data.self), let img = UIImage(data: data) {
             if let r = try? await GeminiClient.shared.analyzeFood(image: img, caption: caption.isEmpty ? nil : caption) {
                 items.append(contentsOf: r.items)
-            } else { error = "Photo analysis failed — add it another way." }
+            } else {
+                error = "Photo analysis failed — add it another way."
+                SupabaseClient.shared.logClientError(area: "builder.analyze_photo_failed",
+                                                     message: "Gemini photo analysis returned nil in meal builder",
+                                                     context: caption.isEmpty ? nil : String(caption.prefix(200)))
+            }
+        } else {
+            error = "Couldn't read that photo — try another."
+            SupabaseClient.shared.logClientError(area: "builder.photo_load_failed",
+                                                 message: "PhotosPicker loadTransferable failed or UIImage init failed",
+                                                 context: nil)
         }
         photoItem = nil
         isAnalyzing = false; analyzingLabel = ""
@@ -1135,11 +1334,14 @@ private struct MealBuilderSheet: View {
         guard !items.isEmpty else { return }
         isSaving = true; error = nil
         do {
-            let saved = try await SupabaseClient.shared.saveCombinedMeal(items: items, caption: caption)
+            let saved = try await SupabaseClient.shared.saveCombinedMeal(items: items, caption: caption, capturedAt: eatenAt)
             onSaved(saved)
             dismiss()
         } catch {
             self.error = "Save failed — check connection."
+            SupabaseClient.shared.logClientError(area: "builder.save_failed",
+                                                 message: error.localizedDescription,
+                                                 context: caption.isEmpty ? nil : String(caption.prefix(200)))
             isSaving = false
         }
     }
