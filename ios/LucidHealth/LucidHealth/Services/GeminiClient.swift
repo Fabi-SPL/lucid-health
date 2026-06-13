@@ -45,14 +45,30 @@ class GeminiClient {
         req.httpBody = try JSONSerialization.data(withJSONObject: args)
         req.timeoutInterval = 60
 
-        let (data, response) = try await URLSession.shared.data(for: req)
-        let status = (response as? HTTPURLResponse)?.statusCode ?? 0
-        guard status < 300 else {
-            let msg = String(data: data, encoding: .utf8) ?? ""
-            throw NSError(domain: "Gemini", code: status, userInfo: [NSLocalizedDescriptionKey: msg])
+        do {
+            let (data, response) = try await URLSession.shared.data(for: req)
+            let status = (response as? HTTPURLResponse)?.statusCode ?? 0
+            guard status < 300 else {
+                let msg = String(data: data, encoding: .utf8) ?? ""
+                sb.logClientError(area: "gemini.\(rpc).http_\(status)", message: msg, context: argsSummary(args))
+                throw NSError(domain: "Gemini", code: status, userInfo: [NSLocalizedDescriptionKey: msg])
+            }
+            return try parseGeminiResponse(data)
+        } catch let err where !(err is CancellationError) {
+            // transport error (timeout, offline) or parse failure — record it, then rethrow
+            if (err as NSError).domain != "Gemini" {
+                sb.logClientError(area: "gemini.\(rpc).transport", message: err.localizedDescription, context: argsSummary(args))
+            }
+            throw err
         }
+    }
 
-        return try parseGeminiResponse(data)
+    /// Compact, PII-light summary of the call args for the error log (no base64 blobs).
+    private func argsSummary(_ args: [String: Any]) -> String {
+        if let d = args["p_description"] as? String { return "text: \(d.prefix(200))" }
+        if let c = args["p_caption"] as? String { return "photo+caption: \(c.prefix(120))" }
+        if args["p_image_base64"] != nil { return "photo (no caption)" }
+        return ""
     }
 
     // MARK: - Image Resize

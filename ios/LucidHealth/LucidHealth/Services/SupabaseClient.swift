@@ -2604,6 +2604,122 @@ extension SupabaseClient {
         return out
     }
 
+    // MARK: - Food Favorites
+
+    /// User's saved meals/drinks, most-relevant first (manual sort, then most-logged).
+    func fetchFavorites() async throws -> [FoodFavorite] {
+        var comps = URLComponents(string: "\(baseURL)/rest/v1/food_favorites")!
+        comps.queryItems = [
+            URLQueryItem(name: "user_id", value: "eq.\(userId)"),
+            URLQueryItem(name: "order", value: "sort_order.asc,times_logged.desc")
+        ]
+        var req = URLRequest(url: comps.url!)
+        req.httpMethod = "GET"
+        req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+
+        let (data, response) = try await authedRequest(req)
+        let status = (response as? HTTPURLResponse)?.statusCode ?? 0
+        guard status < 300 else {
+            throw NSError(domain: "Supabase", code: status,
+                          userInfo: [NSLocalizedDescriptionKey: String(data: data, encoding: .utf8) ?? ""])
+        }
+        let decoder = JSONDecoder()
+        if let all = try? decoder.decode([FoodFavorite].self, from: data) { return all }
+        // Tolerant fallback: skip a single shape-drift row instead of blanking the bar.
+        guard let rows = try JSONSerialization.jsonObject(with: data) as? [[String: Any]] else { return [] }
+        var out: [FoodFavorite] = []
+        for obj in rows {
+            guard let rowData = try? JSONSerialization.data(withJSONObject: obj),
+                  let fav = try? decoder.decode(FoodFavorite.self, from: rowData) else { continue }
+            out.append(fav)
+        }
+        return out
+    }
+
+    /// One-tap re-log of a saved favorite → a normal food_entries row at `capturedAt`.
+    func logFromFavorite(_ fav: FoodFavorite, capturedAt: Date = Date()) async throws -> FoodEntry {
+        let entry = FoodEntry(
+            id: nil,
+            userId: userId,
+            capturedAt: capturedAt,
+            photoUrl: nil,
+            geminiRawJson: nil,
+            items: fav.items,
+            caption: fav.name,
+            totalKcal: fav.totalKcal,
+            novaAvg: fav.novaAvg,
+            mindScore: fav.mindScore,
+            confidence: fav.confidence ?? "high",
+            source: "favorite",
+            createdAt: nil,
+            logQuality: FoodEntry.computeLogQuality(source: "favorite", confidence: fav.confidence, items: fav.items)
+        )
+        let saved = try await saveFoodEntry(entry)
+        bumpFavoriteUsage(fav)
+        return saved
+    }
+
+    /// Persist an existing entry as a reusable favorite.
+    func saveFavorite(from entry: FoodEntry, name: String, emoji: String = "🍽️") async throws {
+        struct FavoriteInsert: Encodable {
+            let user_id: String
+            let name: String
+            let emoji: String
+            let items: [DetectedItem]
+            let total_kcal: Int?
+            let nova_avg: Double?
+            let mind_score: Int?
+            let confidence: String?
+            let source: String
+            let sort_order: Int
+        }
+        let payload = FavoriteInsert(
+            user_id: userId, name: name, emoji: emoji, items: entry.items,
+            total_kcal: entry.totalKcal, nova_avg: entry.novaAvg, mind_score: entry.mindScore,
+            confidence: entry.confidence, source: "manual", sort_order: 10
+        )
+        let url = URL(string: "\(baseURL)/rest/v1/food_favorites")!
+        var req = URLRequest(url: url)
+        req.httpMethod = "POST"
+        req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        req.setValue("return=minimal", forHTTPHeaderField: "Prefer")
+        req.httpBody = try JSONEncoder().encode(payload)
+
+        let (data, response) = try await authedRequest(req)
+        let status = (response as? HTTPURLResponse)?.statusCode ?? 0
+        guard status < 300 else {
+            throw NSError(domain: "Supabase", code: status,
+                          userInfo: [NSLocalizedDescriptionKey: String(data: data, encoding: .utf8) ?? ""])
+        }
+    }
+
+    func deleteFavorite(id: String) async -> Bool {
+        do {
+            let safeId = id.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? id
+            let url = URL(string: "\(baseURL)/rest/v1/food_favorites?id=eq.\(safeId)&user_id=eq.\(userId)")!
+            var req = URLRequest(url: url)
+            req.httpMethod = "DELETE"
+            req.setValue("return=minimal", forHTTPHeaderField: "Prefer")
+            let (_, response) = try await authedRequest(req)
+            return ((response as? HTTPURLResponse)?.statusCode ?? 0) < 300
+        } catch { return false }
+    }
+
+    /// Fire-and-forget: bump times_logged + last_logged_at so the bar self-sorts. Never throws.
+    private func bumpFavoriteUsage(_ fav: FoodFavorite) {
+        guard let id = fav.id?.uuidString else { return }
+        Task {
+            do {
+                let url = URL(string: "\(baseURL)/rest/v1/rpc/bump_food_favorite")!
+                var req = URLRequest(url: url)
+                req.httpMethod = "POST"
+                req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+                req.httpBody = try JSONSerialization.data(withJSONObject: ["p_id": id])
+                _ = try await authedRequest(req)
+            } catch {}
+        }
+    }
+
     // MARK: - Photo Upload
 
     func uploadFoodPhoto(_ data: Data, filename: String) async throws -> String {
@@ -2648,9 +2764,35 @@ extension SupabaseClient {
             mindScore: nil,
             confidence: "quick_log",
             source: "quick_log",
-            createdAt: nil
+            createdAt: nil,
+            logQuality: FoodEntry.computeLogQuality(source: "quick_log", confidence: "quick_log", items: [detectedItem])
         )
         return try await saveFoodEntry(entry)
+    }
+
+    // MARK: - Client Error Logging
+
+    /// Fire-and-forget: record a client-side failure (analyze/save/upload) to the
+    /// server `client_error_log` so failures are diagnosable instead of vanishing.
+    /// Never throws, never blocks the caller.
+    func logClientError(area: String, message: String, context: String? = nil) {
+        Task {
+            do {
+                try await ensureAuth()
+                guard let token = accessToken else { return }
+                var body: [String: Any] = ["p_area": area, "p_message": message]
+                if let context { body["p_context"] = context }
+                let url = URL(string: "\(baseURL)/rest/v1/rpc/log_client_error")!
+                var req = URLRequest(url: url)
+                req.httpMethod = "POST"
+                req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+                req.setValue(anonKey, forHTTPHeaderField: "apikey")
+                req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+                req.timeoutInterval = 8
+                req.httpBody = try JSONSerialization.data(withJSONObject: body)
+                _ = try? await session.data(for: req)
+            } catch { /* swallow — logging must never break the flow */ }
+        }
     }
 
     // MARK: - Body Profile + Meal HR
@@ -2736,7 +2878,8 @@ extension SupabaseClient {
             mindScore: nil,
             confidence: "barcode",
             source: "barcode",
-            createdAt: nil
+            createdAt: nil,
+            logQuality: FoodEntry.computeLogQuality(source: "barcode", confidence: "barcode", items: [detectedItem])
         )
         return try await saveFoodEntry(entry)
     }
@@ -2752,16 +2895,17 @@ extension SupabaseClient {
 
     /// Save a multi-source meal built from several items (barcode + described +
     /// photo) as ONE food_entry (source "combined").
-    func saveCombinedMeal(items: [DetectedItem], caption: String) async throws -> FoodEntry {
+    func saveCombinedMeal(items: [DetectedItem], caption: String, capturedAt: Date = Date()) async throws -> FoodEntry {
         let totalKcal = items.reduce(0) { $0 + $1.kcal }
         let novaVals = items.map { Double($0.novaClass) }
         let novaAvg = novaVals.isEmpty ? 1.0 : novaVals.reduce(0, +) / Double(novaVals.count)
         let entry = FoodEntry(
-            id: nil, userId: userId, capturedAt: Date(), photoUrl: nil, geminiRawJson: nil,
+            id: nil, userId: userId, capturedAt: capturedAt, photoUrl: nil, geminiRawJson: nil,
             items: items,
             caption: caption.isEmpty ? items.map(\.name).joined(separator: ", ") : caption,
             totalKcal: totalKcal, novaAvg: novaAvg, mindScore: nil,
-            confidence: "combined", source: "combined", createdAt: nil
+            confidence: "combined", source: "combined", createdAt: nil,
+            logQuality: FoodEntry.computeLogQuality(source: "combined", confidence: "combined", items: items)
         )
         return try await saveFoodEntry(entry)
     }
