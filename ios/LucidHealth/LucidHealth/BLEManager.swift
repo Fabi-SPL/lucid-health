@@ -2933,26 +2933,18 @@ extension BLEManager: CBPeripheralDelegate {
         log("DOUBLE TAP detected")
         pendingTapTimestamp = now
 
-        // Zero-tap quick log: a double-tap instantly logs your #1 most-used item
-        // (e.g. Double Espresso) — no sheet. A SECOND double-tap within 30s opens
-        // the full picker instead ("tap-tap = usual, tap-tap again = pick"). First-ever
-        // use (no history) falls through to the sheet. Disable via UserDefaults flag.
-        let favoriteDisabled = UserDefaults.standard.bool(forKey: "lucid_disable_doubletap_favorite")
+        // Double-tap NEVER auto-logs. It captures the moment, arms the quick-select
+        // sheet, and fires a notification — tap the notification (or open Lucid) to
+        // pick what happened. Removed the old "zero-tap auto-log your #1 item"
+        // behavior: it logged an espresso on every single tap. (Fabi, Jun 2026)
         DispatchQueue.main.async {
             self.lastDoubleTap = now
-            let escalate = now.timeIntervalSince(self.lastFavoriteAutoLog) < 30
-            if !favoriteDisabled, !escalate, let fav = QuickLogHistory.shared.topItems(limit: 1).first {
-                self.lastFavoriteAutoLog = now
-                self.doubleTapMessage = "\(fav.emoji) \(fav.displayName) logged"
-                self.logDoubleTapEvent(type: fav.type, category: fav.category, displayName: fav.displayName)
-            } else {
-                self.doubleTapMessage = "What happened?"
-                self.showDoubleTapSheet = true
-                self.sendQuickTagNotification(
-                    title: "Double tap captured",
-                    body: "Open Lucid to tag what just happened."
-                )
-            }
+            self.doubleTapMessage = "What happened?"
+            self.showDoubleTapSheet = true
+            self.sendQuickTagNotification(
+                title: "Double tap captured",
+                body: "Open Lucid to tag what just happened."
+            )
         }
     }
 
