@@ -57,3 +57,21 @@ yarn-error.log*
 # Build artifacts
 public/LucidHealth.ipa
 public/LucidHealth-*.ipa
+
+# Local session infra + legacy scratch (folder consolidation 2026-06-14)
+.claude/
+.playwright-mcp/
+_legacy-scratch/
+
+# Personal / internal docs — local-only, NEVER publish (Fabi's privacy)
+# Working notes, AI briefs, plans, rules. Code + README + CI stay public.
+CLAUDE.md
+CLAUDE.local.md
+AGENTS.md
+ALGORITHMS.md
+combined-design-principles.md
+**/PRODUCT.md
+**/DESIGN.md
+NOTES.md
+PLAN*.md
+TODO.md
