@@ -251,9 +251,19 @@ class BLEManager: NSObject, ObservableObject {
 
     // MARK: - Background Keepalive Watchdog
     private var lastDataReceived: Date = Date()
-    private var watchdogTimer: Timer?
+    private var watchdogTimer: DispatchSourceTimer?  // background-safe (was Timer on main runloop — frozen while suspended)
     private let watchdogInterval: TimeInterval = 30  // Check every 30s
     private let dataStaleThreshold: TimeInterval = 60  // If no data for 60s, poke connection
+
+    // MARK: - Audio Keep-Alive Self-Healing
+    // The silent-audio keep-alive dies when another app holds the audio session
+    // (music while socializing, a call, Siri) and iOS never delivers a matching
+    // .ended interruption. On .began we re-arm a backoff probe that retries
+    // setActive(true) — fails while the other app holds audio, succeeds the
+    // instant it frees, no reliance on the unreliable .ended callback.
+    private var audioRecoveryTimer: DispatchSourceTimer?
+    private let audioRecoveryQueue = DispatchQueue(label: "com.lucid.audioRecovery", qos: .utility)
+    private let audioRecoveryInterval: TimeInterval = 5  // retry setActive every 5s while interrupted
 
     // MARK: - Battery Prediction
     @Published var batteryPrediction: String = ""
@@ -689,6 +699,27 @@ class BLEManager: NSObject, ObservableObject {
             name: AVAudioSession.interruptionNotification, object: nil
         )
 
+        // Media services can reset (rare, fatal): every audio object becomes
+        // invalid and the silent player is dead PERMANENTLY unless we rebuild the
+        // whole session. Without this observer that's a silent BLE-death path.
+        NotificationCenter.default.removeObserver(self, name: AVAudioSession.mediaServicesWereResetNotification, object: nil)
+        NotificationCenter.default.addObserver(
+            self, selector: #selector(handleMediaServicesReset(_:)),
+            name: AVAudioSession.mediaServicesWereResetNotification, object: nil
+        )
+
+        // Audio ROUTE changes (a Bluetooth speaker the player was routed to gets grabbed
+        // by another device, headphones unplugged): on .oldDeviceUnavailable iOS auto-PAUSES
+        // our silent player with NO interruption notification — a silent keep-alive death.
+        // This is the BT-speaker-handoff gap. Scoped to .oldDeviceUnavailable ONLY: our own
+        // setCategory/setActive emit .categoryChange/.routeConfigurationChange, and rebuilding
+        // on those would infinite-loop.
+        NotificationCenter.default.removeObserver(self, name: AVAudioSession.routeChangeNotification, object: nil)
+        NotificationCenter.default.addObserver(
+            self, selector: #selector(handleAudioRouteChange(_:)),
+            name: AVAudioSession.routeChangeNotification, object: nil
+        )
+
         do {
             let session = AVAudioSession.sharedInstance()
             try session.setCategory(.playback, mode: .default, options: [.mixWithOthers])
@@ -721,9 +752,12 @@ class BLEManager: NSObject, ObservableObject {
     }
 
     func stopSilentAudio() {
+        stopAudioRecoveryProbe()
         audioPlayer?.stop()
         audioPlayer = nil
         NotificationCenter.default.removeObserver(self, name: AVAudioSession.interruptionNotification, object: nil)
+        NotificationCenter.default.removeObserver(self, name: AVAudioSession.mediaServicesWereResetNotification, object: nil)
+        NotificationCenter.default.removeObserver(self, name: AVAudioSession.routeChangeNotification, object: nil)
         try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
         silentAudioActive = false
         log("Silent audio keep-alive STOPPED")
@@ -738,9 +772,13 @@ class BLEManager: NSObject, ObservableObject {
 
         switch type {
         case .began:
-            log("Audio interrupted (another app took over) — BLE keep-alive paused")
+            log("Audio interrupted (another app took over) — starting self-healing reactivation probe")
+            // Don't wait for .ended (Apple does NOT guarantee it fires). Retry
+            // setActive on a background-safe timer until the session is ours again.
+            startAudioRecoveryProbe()
         case .ended:
             log("Audio interruption ended — full restart of silent keep-alive")
+            stopAudioRecoveryProbe()
             // Always do a clean stop + restart. Reusing the existing player is unreliable:
             // silentAudioActive can be true while the player is dead (race condition),
             // causing the keep-alive to silently fail and BLE to drop during overnight sleep.
@@ -754,24 +792,107 @@ class BLEManager: NSObject, ObservableObject {
         }
     }
 
-    // MARK: - Background Watchdog (detects iOS throttling)
+    // MARK: - Audio Recovery Probe (background-safe)
 
-    private func startWatchdog() {
-        DispatchQueue.main.async {
-            self.watchdogTimer?.invalidate()
-            self.lastDataReceived = Date()
-            self.watchdogTimer = Timer.scheduledTimer(withTimeInterval: self.watchdogInterval, repeats: true) { [weak self] _ in
-                self?.checkDataFreshness()
+    /// Retry AVAudioSession.setActive(true) on a background timer. While another
+    /// app holds the audio session this throws every tick; the moment it frees,
+    /// it succeeds and we rebuild the silent keep-alive — no reliance on .ended.
+    private func startAudioRecoveryProbe() {
+        guard Self.audioKeepAliveEnabled else { return }
+        // ALL audioRecoveryTimer access is funneled onto audioRecoveryQueue. Without
+        // this, the notification thread (.began/.ended), main (stopSilentAudio), and
+        // the timer's own handler race on the non-atomic optional → ARC double-release
+        // (use-after-free) in always-on overnight code. Serial queue = one writer.
+        audioRecoveryQueue.async { [weak self] in
+            guard let self = self else { return }
+            self.audioRecoveryTimer?.cancel()
+            let timer = DispatchSource.makeTimerSource(queue: self.audioRecoveryQueue)
+            timer.schedule(deadline: .now() + self.audioRecoveryInterval, repeating: self.audioRecoveryInterval)
+            timer.setEventHandler { [weak self] in
+                guard let self = self else { return }
+                do {
+                    try AVAudioSession.sharedInstance().setActive(true)
+                    // Session reclaimed — cancel inline (already on-queue), then rebuild
+                    // on main. startSilentAudio re-creates and .play()s the player, so
+                    // liveness is restored there (not merely trusting setActive success).
+                    self.log("Audio session reclaimed — rebuilding silent keep-alive")
+                    self.audioRecoveryTimer?.cancel()
+                    self.audioRecoveryTimer = nil
+                    DispatchQueue.main.async {
+                        self.stopSilentAudio()
+                        self.startSilentAudio()
+                    }
+                } catch {
+                    // Still held by an exclusive app (call/Siri) — keep probing until it frees.
+                }
             }
-            self.log("Watchdog started — will detect data throttling")
+            timer.resume()
+            self.audioRecoveryTimer = timer
         }
     }
 
-    private func stopWatchdog() {
-        DispatchQueue.main.async {
-            self.watchdogTimer?.invalidate()
-            self.watchdogTimer = nil
+    private func stopAudioRecoveryProbe() {
+        audioRecoveryQueue.async { [weak self] in
+            guard let self = self else { return }
+            self.audioRecoveryTimer?.cancel()
+            self.audioRecoveryTimer = nil
         }
+    }
+
+    /// Media services reset — every audio object is now invalid. Rebuild the
+    /// entire silent keep-alive from scratch or BLE dies permanently.
+    @objc private func handleMediaServicesReset(_ notification: Notification) {
+        log("⚠️ Media services were reset — rebuilding audio keep-alive from scratch")
+        stopAudioRecoveryProbe()
+        DispatchQueue.main.async { [weak self] in
+            guard let self = self else { return }
+            self.audioPlayer = nil          // old player object is invalid after reset
+            self.silentAudioActive = false
+            self.startSilentAudio()
+        }
+    }
+
+    /// Audio output route changed. On .oldDeviceUnavailable (the Bluetooth speaker /
+    /// headphones the silent player was routed to went away — e.g. another device grabbed
+    /// the speaker) iOS auto-pauses playback with NO interruption notification, silently
+    /// killing the keep-alive. Rebuild. Scoped to .oldDeviceUnavailable ONLY — our own
+    /// setCategory/setActive emit .categoryChange/.routeConfigurationChange and rebuilding
+    /// on those would loop.
+    @objc private func handleAudioRouteChange(_ notification: Notification) {
+        guard let info = notification.userInfo,
+              let reasonValue = info[AVAudioSessionRouteChangeReasonKey] as? UInt,
+              let reason = AVAudioSession.RouteChangeReason(rawValue: reasonValue),
+              reason == .oldDeviceUnavailable else { return }
+        log("Audio route lost its output device (BT speaker handoff?) — rebuilding silent keep-alive")
+        DispatchQueue.main.async { [weak self] in
+            guard let self = self, self.silentAudioActive else { return }
+            self.stopSilentAudio()
+            self.startSilentAudio()
+        }
+    }
+
+    // MARK: - Background Watchdog (detects iOS throttling)
+
+    private func startWatchdog() {
+        // DispatchSourceTimer on bleQueue — NOT Timer.scheduledTimer. A main-runloop
+        // Timer is frozen while the app is suspended, so the old watchdog could never
+        // fire exactly when it was needed (overnight, app backgrounded). The BLE queue
+        // stays alive during background CoreBluetooth sessions (same fix as the log timer).
+        watchdogTimer?.cancel()
+        lastDataReceived = Date()
+        let timer = DispatchSource.makeTimerSource(queue: bleQueue)
+        timer.schedule(deadline: .now() + watchdogInterval, repeating: watchdogInterval)
+        timer.setEventHandler { [weak self] in
+            self?.checkDataFreshness()
+        }
+        timer.resume()
+        watchdogTimer = timer
+        log("Watchdog started (background-safe DispatchSourceTimer) — will detect data throttling")
+    }
+
+    private func stopWatchdog() {
+        watchdogTimer?.cancel()
+        watchdogTimer = nil
     }
 
     private func checkDataFreshness() {
@@ -779,6 +900,19 @@ class BLEManager: NSObject, ObservableObject {
 
         if staleness > dataStaleThreshold {
             log("WATCHDOG: No data for \(Int(staleness))s — iOS may be throttling BLE")
+
+            // Strategy 0: the silent keep-alive may have silently died (player dead while
+            // silentAudioActive=true, or output priority lost from a NON-mixable interruption
+            // that never posted .began). The .began probe structurally can't see that case —
+            // but if we're awake enough to run the watchdog, we can verify the player is
+            // actually playing and rebuild if not.
+            DispatchQueue.main.async {
+                if self.silentAudioActive, self.audioPlayer?.isPlaying != true {
+                    self.log("WATCHDOG: silent keep-alive player is dead — rebuilding")
+                    self.stopSilentAudio()
+                    self.startSilentAudio()
+                }
+            }
 
             // Strategy 1: Re-send the startHR command to wake up the data stream
             if let p = peripheral, let c = cmdToStrap, p.state == .connected {
