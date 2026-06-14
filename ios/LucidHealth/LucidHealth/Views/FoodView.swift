@@ -25,6 +25,7 @@ struct FoodView: View {
     @State private var pendingDelete: FoodEntry?
     @State private var editing: FoodEntry?
     @State private var detailEntry: FoodEntry?
+    @State private var quickEdit: QuickLogSource?
 
     private var filtered: [FoodEntry] {
         switch filter {
@@ -88,8 +89,8 @@ struct FoodView: View {
 
                     FavoritesBar(
                         favorites: favorites,
-                        onLog: { item in Task { await quickLog(item) } },
-                        onLogFavorite: { fav in Task { await logFavorite(fav) } }
+                        onLog: { item in quickEdit = .preset(item) },
+                        onLogFavorite: { fav in quickEdit = .favorite(fav) }
                     )
                     .padding(.top, DS.Spacing.md)
                     .listRowInsets(EdgeInsets())
@@ -208,6 +209,18 @@ struct FoodView: View {
                     entries[idx] = updated
                 }
             }
+        }
+        .sheet(item: $quickEdit) { source in
+            QuickLogEditorSheet(
+                source: source,
+                onLogged: { saved in
+                    entries.insert(saved, at: 0)
+                    saveSuccessCount += 1
+                    quickEdit = nil
+                },
+                onCancel: { quickEdit = nil }
+            )
+            .presentationDetents([.medium, .large])
         }
         .confirmationDialog(
             "Delete this entry?",
@@ -339,37 +352,9 @@ struct FoodView: View {
         isLoading = false
     }
 
-    private func quickLog(_ item: QuickLogItem) async {
-        do {
-            let saved = try await SupabaseClient.shared.saveQuickLog(item)
-            entries.insert(saved, at: 0)
-            // Feed the shared "most used" ranking so this also becomes the
-            // Whoop double-tap favorite over time.
-            QuickLogHistory.shared.record(
-                name: item.name.lowercased(), displayName: item.name,
-                emoji: item.emoji, category: item.mirrorCategory, type: item.mirrorType
-            )
-            saveSuccessCount += 1
-        } catch {
-            self.error = "Save failed"
-            saveErrorCount += 1
-        }
-    }
-
     private func loadFavorites() async {
         if let favs = try? await SupabaseClient.shared.fetchFavorites() {
             favorites = favs
-        }
-    }
-
-    private func logFavorite(_ fav: FoodFavorite) async {
-        do {
-            let saved = try await SupabaseClient.shared.logFromFavorite(fav)
-            entries.insert(saved, at: 0)
-            saveSuccessCount += 1
-        } catch {
-            self.error = "Save failed"
-            saveErrorCount += 1
         }
     }
 
@@ -488,30 +473,24 @@ private struct FavoritesBar: View {
     }
 }
 
-/// Tap-to-log pill for a user FoodFavorite (emoji + name + kcal). Violet-tinted to
-/// distinguish saved meals from the curated single-item quick presets.
+/// Tap-to-open pill for a user FoodFavorite (emoji + name + kcal). Violet-tinted to
+/// distinguish saved meals from the curated single-item quick presets. Tap opens
+/// the quick editor (pick time, confirm) instead of logging instantly.
 private struct FavoritePill: View {
     let favorite: FoodFavorite
     let onTap: () -> Void
 
-    @State private var isPressed = false
-    @State private var didLog = false
-
     var body: some View {
         Button {
-            UIImpactFeedbackGenerator(style: .medium).impactOccurred()
-            withAnimation(DS.Anim.quick) { didLog = true }
+            DS.Haptic.tap()
             onTap()
-            DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) {
-                withAnimation(DS.Anim.quick) { didLog = false }
-            }
         } label: {
             HStack(spacing: 6) {
                 Text(favorite.emoji ?? "🍽️")
                     .font(.system(size: 14))
                 Text(favorite.name)
                     .font(.system(size: 13, weight: .medium, design: .rounded))
-                    .foregroundStyle(didLog ? DS.Colors.teal : DS.Colors.textPrimary)
+                    .foregroundStyle(DS.Colors.textPrimary)
                     .lineLimit(1)
                 if let k = favorite.totalKcal, k > 0 {
                     Text("\(k)")
@@ -523,26 +502,13 @@ private struct FavoritePill: View {
             .padding(.vertical, DS.Spacing.sm)
             .background(
                 Capsule()
-                    .fill(didLog
-                          ? DS.Colors.teal.opacity(0.15)
-                          : DS.Colors.violet.opacity(0.10))
+                    .fill(DS.Colors.violet.opacity(0.10))
                     .overlay(
-                        Capsule()
-                            .stroke(
-                                didLog ? DS.Colors.teal.opacity(0.4) : DS.Colors.borderViolet,
-                                lineWidth: 0.5
-                            )
+                        Capsule().stroke(DS.Colors.borderViolet, lineWidth: 0.5)
                     )
             )
-            .scaleEffect(isPressed ? 0.95 : (didLog ? 1.03 : 1.0))
         }
-        .buttonStyle(.plain)
-        .simultaneousGesture(
-            DragGesture(minimumDistance: 0)
-                .onChanged { _ in withAnimation(DS.Anim.quick) { isPressed = true } }
-                .onEnded   { _ in withAnimation(DS.Anim.quick) { isPressed = false } }
-        )
-        .animation(DS.Anim.quick, value: didLog)
+        .buttonStyle(PressableScale())
     }
 }
 
@@ -1374,6 +1340,308 @@ private struct BarcodeItemScannerSheet: View {
                     .padding(.bottom, DS.Spacing.xl)
                     .frame(maxWidth: .infinity)
             }
+        }
+    }
+}
+
+// MARK: - Quick Log Editor (tap a quick-log pill → tweak → save)
+
+/// What the quick editor was opened for — a curated preset or a saved favorite.
+enum QuickLogSource: Identifiable {
+    case preset(QuickLogItem)
+    case favorite(FoodFavorite)
+
+    var id: String {
+        switch self {
+        case .preset(let i):   return "p-\(i.id)"
+        case .favorite(let f): return "f-\(f.id?.uuidString ?? f.name)"
+        }
+    }
+}
+
+/// Lightweight pre-filled meal builder. Opens on a quick-log tap so an accidental
+/// touch never writes a junk entry — you confirm (and can tweak amount/kcal/time)
+/// before it saves. Espresso defaults to Fabi's measured 80ml cup.
+private struct QuickLogEditorSheet: View {
+    let source: QuickLogSource
+    let onLogged: (FoodEntry) -> Void
+    let onCancel: () -> Void
+
+    @State private var name: String
+    @State private var amountText: String
+    @State private var kcal: Int
+    @State private var caffeine: Int
+    @State private var showCaffeine: Bool
+    @State private var eatenAt: Date = Date()
+    @State private var isSaving = false
+    @State private var error: String?
+
+    @Environment(\.dismiss) private var dismiss
+
+    init(source: QuickLogSource, onLogged: @escaping (FoodEntry) -> Void, onCancel: @escaping () -> Void) {
+        self.source = source
+        self.onLogged = onLogged
+        self.onCancel = onCancel
+        switch source {
+        case .preset(let item):
+            let d = Self.intakeDefaults(for: item)
+            _name = State(initialValue: item.name)
+            _amountText = State(initialValue: d.amount)
+            _kcal = State(initialValue: item.kcal)
+            _caffeine = State(initialValue: d.caffeine ?? 0)
+            _showCaffeine = State(initialValue: d.caffeine != nil)
+        case .favorite(let fav):
+            _name = State(initialValue: fav.name)
+            _amountText = State(initialValue: fav.servingNote ?? "1 serving")
+            _kcal = State(initialValue: fav.totalKcal ?? 0)
+            _caffeine = State(initialValue: 0)
+            _showCaffeine = State(initialValue: false)
+        }
+    }
+
+    /// Sensible volume + caffeine per known intake item (brand-independent —
+    /// espresso caffeine tracks shots/volume, not the bean brand).
+    private static func intakeDefaults(for item: QuickLogItem) -> (amount: String, caffeine: Int?) {
+        switch item.id {
+        case "double_espresso": return ("80 ml", 150)   // Fabi's measured cup
+        case "espresso":        return ("40 ml", 75)
+        case "cappuccino":      return ("150 ml", 75)
+        case "coffee":          return ("250 ml", 95)
+        case "water":           return ("250 ml", nil)
+        case "wine":            return ("0.2 l", nil)
+        case "beer":            return ("0.5 l", nil)
+        default:                return ("1 serving", nil)
+        }
+    }
+
+    private var emoji: String {
+        switch source {
+        case .preset(let i):   return i.emoji
+        case .favorite(let f): return f.emoji ?? "🍽️"
+        }
+    }
+
+    private var presetItem: QuickLogItem? {
+        if case .preset(let i) = source { return i }
+        return nil
+    }
+
+    var body: some View {
+        ZStack {
+            MeshGradientBackground().ignoresSafeArea()
+            ScrollView(showsIndicators: false) {
+                VStack(spacing: DS.Spacing.lg) {
+                    header
+                    if let item = presetItem {
+                        presetFields(item)
+                    } else {
+                        favoriteSummary
+                    }
+                    timeCard
+                    if let error {
+                        AlertBanner(icon: "exclamationmark.triangle", message: error, color: DS.Colors.danger)
+                    }
+                    saveButton
+                    Color.clear.frame(height: DS.Spacing.lg)
+                }
+                .padding(.horizontal, DS.Spacing.md)
+                .padding(.top, DS.Spacing.lg)
+            }
+        }
+    }
+
+    // MARK: Sections
+
+    private var header: some View {
+        VStack(spacing: 4) {
+            Text(emoji).font(.system(size: 34))
+            Text("Log it")
+                .font(.system(size: 22, weight: .heavy, design: .rounded))
+                .foregroundStyle(DS.Colors.textPrimary)
+            Text("Tweak if you want, then save")
+                .font(.system(size: 11, weight: .medium))
+                .foregroundStyle(DS.Colors.textMuted)
+        }
+        .frame(maxWidth: .infinity)
+    }
+
+    private func presetFields(_ item: QuickLogItem) -> some View {
+        VStack(spacing: DS.Spacing.sm) {
+            fieldRow(label: "NAME") {
+                TextField("Name", text: $name)
+                    .font(DS.Font.body)
+                    .foregroundStyle(DS.Colors.textPrimary)
+            }
+            fieldRow(label: "AMOUNT") {
+                TextField("e.g. 80 ml", text: $amountText)
+                    .font(DS.Font.body)
+                    .foregroundStyle(DS.Colors.textPrimary)
+            }
+            fieldRow(label: "CALORIES") {
+                HStack {
+                    TextField("kcal", value: $kcal, format: .number)
+                        .keyboardType(.numberPad)
+                        .font(DS.Font.body)
+                        .foregroundStyle(DS.Colors.textPrimary)
+                    Text("kcal").font(.system(size: 11)).foregroundStyle(DS.Colors.textFaint)
+                }
+            }
+            if showCaffeine {
+                fieldRow(label: "CAFFEINE") {
+                    HStack {
+                        TextField("mg", value: $caffeine, format: .number)
+                            .keyboardType(.numberPad)
+                            .font(DS.Font.body)
+                            .foregroundStyle(DS.Colors.textPrimary)
+                        Text("mg").font(.system(size: 11)).foregroundStyle(DS.Colors.textFaint)
+                    }
+                }
+            }
+        }
+    }
+
+    private var favoriteSummary: some View {
+        VStack(alignment: .leading, spacing: DS.Spacing.xs) {
+            Text(name)
+                .font(.system(size: 16, weight: .semibold, design: .rounded))
+                .foregroundStyle(DS.Colors.textPrimary)
+            HStack(spacing: DS.Spacing.sm) {
+                if kcal > 0 {
+                    Label("\(kcal) kcal", systemImage: "flame.fill")
+                        .font(.system(size: 12)).foregroundStyle(DS.Colors.amber)
+                }
+                if amountText != "1 serving" {
+                    Text(amountText).font(.system(size: 12)).foregroundStyle(DS.Colors.textMuted)
+                }
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(DS.Spacing.md)
+        .glassDefault()
+    }
+
+    private func fieldRow<Content: View>(label: String, @ViewBuilder _ content: () -> Content) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text(label)
+                .font(.system(size: 9, weight: .bold))
+                .foregroundStyle(DS.Colors.textFaint)
+                .tracking(1)
+            content()
+                .padding(.horizontal, 14).padding(.vertical, 12)
+                .background(
+                    RoundedRectangle(cornerRadius: DS.Radius.md, style: .continuous)
+                        .fill(DS.Colors.surface)
+                        .overlay(RoundedRectangle(cornerRadius: DS.Radius.md, style: .continuous)
+                            .stroke(DS.Colors.border, lineWidth: 0.5))
+                )
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private var timeCard: some View {
+        VStack(alignment: .leading, spacing: DS.Spacing.xs) {
+            Text("WHEN")
+                .font(.system(size: 9, weight: .bold))
+                .foregroundStyle(DS.Colors.textFaint)
+                .tracking(1)
+            DatePicker("", selection: $eatenAt, in: ...Date(), displayedComponents: [.date, .hourAndMinute])
+                .datePickerStyle(.compact)
+                .labelsHidden()
+                .tint(DS.Colors.violet)
+            HStack(spacing: DS.Spacing.xs) {
+                timeChip("Now") { eatenAt = Date() }
+                timeChip("30m ago") { eatenAt = Date().addingTimeInterval(-1800) }
+                timeChip("1h ago") { eatenAt = Date().addingTimeInterval(-3600) }
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(DS.Spacing.md)
+        .glassDefault()
+    }
+
+    private func timeChip(_ label: String, action: @escaping () -> Void) -> some View {
+        Button(action: { DS.Haptic.tap(); action() }) {
+            Text(label)
+                .font(.system(size: 11, weight: .semibold, design: .rounded))
+                .foregroundStyle(DS.Colors.violet)
+                .padding(.horizontal, 10).padding(.vertical, 6)
+                .background(Capsule().fill(DS.Colors.violet.opacity(0.12))
+                    .overlay(Capsule().stroke(DS.Colors.violet.opacity(0.25), lineWidth: 0.5)))
+        }
+        .buttonStyle(.plain)
+    }
+
+    private var saveButton: some View {
+        VStack(spacing: DS.Spacing.sm) {
+            Button { Task { await save() } } label: {
+                HStack {
+                    if isSaving { ProgressView().tint(.white) }
+                    else { Image(systemName: "checkmark"); Text("Log it") }
+                }
+                .font(.system(size: 14, weight: .semibold, design: .rounded))
+                .foregroundStyle(.white).frame(maxWidth: .infinity).padding(.vertical, DS.Spacing.md)
+                .background(Capsule().fill(DS.Colors.violet))
+            }
+            .buttonStyle(.plain).disabled(isSaving)
+
+            Button { DS.Haptic.tap(); dismiss(); onCancel() } label: {
+                Text("Cancel")
+                    .font(.system(size: 13, weight: .medium, design: .rounded))
+                    .foregroundStyle(DS.Colors.textMuted)
+                    .frame(maxWidth: .infinity).padding(.vertical, DS.Spacing.sm)
+            }
+            .buttonStyle(.plain).disabled(isSaving)
+        }
+    }
+
+    // MARK: Save
+
+    private func save() async {
+        isSaving = true; error = nil
+        do {
+            let saved: FoodEntry
+            switch source {
+            case .favorite(let fav):
+                saved = try await SupabaseClient.shared.logFromFavorite(fav, capturedAt: eatenAt)
+            case .preset(let item):
+                var notes: [String] = []
+                let amt = amountText.trimmingCharacters(in: .whitespaces)
+                if !amt.isEmpty && amt.lowercased() != "1 serving" { notes.append(amt) }
+                if showCaffeine && caffeine > 0 { notes.append("~\(caffeine)mg caffeine") }
+                let caption = notes.isEmpty ? name : "\(name) · \(notes.joined(separator: " · "))"
+                var tags = item.mindTags
+                if showCaffeine && caffeine > 0 && !tags.contains("caffeine") { tags.append("caffeine") }
+                let detected = DetectedItem(name: name, grams: 0, kcal: kcal, novaClass: item.novaClass, mindTags: tags)
+                let entry = FoodEntry(
+                    id: nil,
+                    userId: SupabaseClient.shared.userId,
+                    capturedAt: eatenAt,
+                    photoUrl: nil,
+                    geminiRawJson: nil,
+                    items: [detected],
+                    caption: caption,
+                    totalKcal: kcal,
+                    novaAvg: Double(item.novaClass),
+                    mindScore: nil,
+                    confidence: "quick_log",
+                    source: "quick_log",
+                    createdAt: nil,
+                    logQuality: FoodEntry.computeLogQuality(source: "quick_log", confidence: "quick_log", items: [detected])
+                )
+                saved = try await SupabaseClient.shared.saveFoodEntry(entry)
+                // Feed the shared "most used" ranking (also the Whoop double-tap signal).
+                QuickLogHistory.shared.record(
+                    name: item.name.lowercased(), displayName: item.name,
+                    emoji: item.emoji, category: item.mirrorCategory, type: item.mirrorType
+                )
+            }
+            DS.Haptic.success()
+            dismiss()
+            onLogged(saved)
+        } catch {
+            DS.Haptic.error()
+            self.error = "Save failed — check connection."
+            isSaving = false
         }
     }
 }
