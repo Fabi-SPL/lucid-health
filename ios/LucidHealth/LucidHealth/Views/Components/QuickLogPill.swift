@@ -1,56 +1,48 @@
 import SwiftUI
 
-/// Tap-to-log pill for a QuickLogItem.
+/// Press-scale feedback that does NOT block a parent ScrollView's pan gesture.
+/// (The old pills used `.simultaneousGesture(DragGesture(minimumDistance: 0))`,
+/// which grabbed every touch — so the bar couldn't scroll and a scroll-start
+/// accidentally logged. ButtonStyle press detection cooperates with scrolling.)
+struct PressableScale: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .scaleEffect(configuration.isPressed ? 0.95 : 1.0)
+            .animation(DS.Anim.quick, value: configuration.isPressed)
+    }
+}
+
+/// Tap-to-open pill for a QuickLogItem. Tap no longer logs instantly — it opens
+/// the quick editor so an accidental touch never writes a junk entry.
 struct QuickLogPill: View {
     let item: QuickLogItem
     let onTap: () -> Void
 
-    @State private var isPressed = false
-    @State private var didLog = false
-
     var body: some View {
         Button {
-            let haptic = UIImpactFeedbackGenerator(style: .medium)
-            haptic.impactOccurred()
-            withAnimation(DS.Anim.quick) { didLog = true }
+            DS.Haptic.tap()
             onTap()
-            DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) {
-                withAnimation(DS.Anim.quick) { didLog = false }
-            }
         } label: {
             HStack(spacing: 6) {
                 Image(systemName: item.icon)
                     .font(.system(size: 14, weight: .semibold))
                     .symbolRenderingMode(.hierarchical)
-                    .foregroundStyle(didLog ? DS.Colors.teal : DS.Colors.violet)
+                    .foregroundStyle(DS.Colors.violet)
                 Text(item.name)
                     .font(.system(size: 13, weight: .medium, design: .rounded))
-                    .foregroundStyle(didLog ? DS.Colors.teal : DS.Colors.textPrimary)
+                    .foregroundStyle(DS.Colors.textPrimary)
                     .lineLimit(1)
             }
             .padding(.horizontal, DS.Spacing.md)
             .padding(.vertical, DS.Spacing.sm)
             .background(
                 Capsule()
-                    .fill(didLog
-                          ? DS.Colors.teal.opacity(0.15)
-                          : DS.Colors.surface.opacity(0.8))
+                    .fill(DS.Colors.surface.opacity(0.8))
                     .overlay(
-                        Capsule()
-                            .stroke(
-                                didLog ? DS.Colors.teal.opacity(0.4) : DS.Colors.border,
-                                lineWidth: 0.5
-                            )
+                        Capsule().stroke(DS.Colors.border, lineWidth: 0.5)
                     )
             )
-            .scaleEffect(isPressed ? 0.95 : (didLog ? 1.03 : 1.0))
         }
-        .buttonStyle(.plain)
-        .simultaneousGesture(
-            DragGesture(minimumDistance: 0)
-                .onChanged { _ in withAnimation(DS.Anim.quick) { isPressed = true } }
-                .onEnded   { _ in withAnimation(DS.Anim.quick) { isPressed = false } }
-        )
-        .animation(DS.Anim.quick, value: didLog)
+        .buttonStyle(PressableScale())
     }
 }
