@@ -143,11 +143,6 @@ Hermes (the body-state interpreter) is intentionally **not a wellness app**. The
 - **BLE:** CoreBluetooth (iOS) + bleak (Python, for diagnostics)
 - **Sideload:** AltStore PAL / AltStore Classic (no Apple Developer Program enrollment required)
 
-## Related
-
-- Built as part of [Lucid](https://lucid-ai.app) — a private ADHD productivity app. Lucid Health is the part of that ecosystem that talks to your body. Lucid itself stays closed-source.
-- Sister apps (not in this repo): **Lucid Bridge** (standalone Whoop streamer) and **Lucid Ride** (motorcycle ride telemetry).
-
 ## License
 
 MIT — see [LICENSE](./LICENSE). No warranty, no medical advice, not a medical device. If your body is doing something weird, see a doctor.
