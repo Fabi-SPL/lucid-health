@@ -13,6 +13,7 @@ struct InsightsView: View {
     @State private var appeared = false
     @State private var confidenceFilter: FoodPattern.ConfidenceTier? = nil  // All — show strongest real patterns first
     @State private var showCoherenceDrill = false
+    @State private var showBiostate = false
     @State private var lastNight: SleepRestlessness? = nil
     @State private var illness: IllnessRisk? = nil
 
@@ -122,6 +123,16 @@ struct InsightsView: View {
             ToolbarItem(placement: .principal) {
                 TwoToneHeadline(primary: "Insights", secondary: " · Patterns", font: .system(size: 17, weight: .bold, design: .rounded))
             }
+            ToolbarItem(placement: .navigationBarLeading) {
+                Button {
+                    DS.Haptic.tap()
+                    showBiostate = true
+                } label: {
+                    Image(systemName: "waveform.path.ecg")
+                        .font(.system(size: 16, weight: .semibold))
+                        .foregroundStyle(DS.Colors.violet)
+                }
+            }
             ToolbarItem(placement: .navigationBarTrailing) {
                 SettingsGearButton()
             }
@@ -133,6 +144,9 @@ struct InsightsView: View {
         .fullScreenCover(isPresented: $showCoherenceDrill) {
             CoherenceDrillView()
                 .environmentObject(bleManager)
+        }
+        .fullScreenCover(isPresented: $showBiostate) {
+            BiostateDashboardView()
         }
     }
 

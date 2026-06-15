@@ -45,6 +45,7 @@
 		LH000022 /* HealthView.swift in Sources */ = {isa = PBXBuildFile; fileRef = LH100024; };
 		LH000023 /* FoodView.swift in Sources */ = {isa = PBXBuildFile; fileRef = LH100025; };
 		LH000024 /* InsightsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = LH100026; };
+		LH0000B0 /* BiostateDashboardView.swift in Sources */ = {isa = PBXBuildFile; fileRef = LH1000B0; };
 		LH000025 /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = LH100027; };
 		LH000026 /* CameraView.swift in Sources */ = {isa = PBXBuildFile; fileRef = LH100028; };
 		LH000027 /* ReviewView.swift in Sources */ = {isa = PBXBuildFile; fileRef = LH100029; };
@@ -173,6 +174,7 @@
 		LH100024 /* HealthView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HealthView.swift; sourceTree = "<group>"; };
 		LH100025 /* FoodView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FoodView.swift; sourceTree = "<group>"; };
 		LH100026 /* InsightsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InsightsView.swift; sourceTree = "<group>"; };
+		LH1000B0 /* BiostateDashboardView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BiostateDashboardView.swift; sourceTree = "<group>"; };
 		LH100027 /* SettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsView.swift; sourceTree = "<group>"; };
 		LH100028 /* CameraView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CameraView.swift; sourceTree = "<group>"; };
 		LH100029 /* ReviewView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReviewView.swift; sourceTree = "<group>"; };
@@ -315,6 +317,7 @@
 				LH100024 /* HealthView.swift */,
 				LH100025 /* FoodView.swift */,
 				LH100026 /* InsightsView.swift */,
+				LH1000B0 /* BiostateDashboardView.swift */,
 				LH100027 /* SettingsView.swift */,
 				LH100028 /* CameraView.swift */,
 				LH100029 /* ReviewView.swift */,
@@ -534,6 +537,7 @@
 				LH000022 /* HealthView.swift in Sources */,
 				LH000023 /* FoodView.swift in Sources */,
 				LH000024 /* InsightsView.swift in Sources */,
+				LH0000B0 /* BiostateDashboardView.swift in Sources */,
 				LH000025 /* SettingsView.swift in Sources */,
 				LH000026 /* CameraView.swift in Sources */,
 				LH000027 /* ReviewView.swift in Sources */,

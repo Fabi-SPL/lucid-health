@@ -523,4 +523,182 @@ final class ExperimentalFeaturesService {
             return (try? JSONDecoder().decode([Culprit].self, from: data)) ?? []
         } catch { return [] }
     }
+
+    // ════════════════════════════════════════════════════════════════
+    // MARK: - Biostate engine (EXPERIMENTAL — drunk / arousal / respiration)
+    //
+    // Server-side detectors v141-v146. Everything here is experimental:true —
+    // never consume as ground truth. Live read = biostate_all_now (one round-trip),
+    // week-graph = biostate_history (15-min cron samples), corrections =
+    // log_state_correction (trains namespaced biostate_* priors only).
+    // ════════════════════════════════════════════════════════════════
+
+    struct ArousalReading: Codable {
+        var arousal: Double?
+        var arousal_raw: Double?
+        var band: String?
+        var emoji: String?
+        var confidence: Double?
+        var rmssd: Double?
+        var baseline_rmssd: Double?
+        var rmssd_drop_pct: Double?
+        var hr: Double?
+        var baseline_hr: Double?
+        var hr_rise: Double?
+        var signals_disagree: Bool?
+        var sleep_stage: String?
+        var activity_state: String?
+        var reason: String?
+    }
+
+    struct DrunkReading: Codable {
+        var gated: Bool?
+        var alcohol_mode: Bool?
+        var stage: Int?
+        var label: String?
+        var raw_label: String?
+        var confidence: Double?
+        var rmssd: Double?
+        var baseline_rmssd: Double?
+        var rmssd_ratio: Double?
+        var hr: Double?
+        var hr_rise: Double?
+        var hr_corroborated: Bool?
+        var dfa_alpha1: Double?
+        var dfa_booster_fired: Bool?
+        var sleep_stage: String?
+        var activity_state: String?
+        var reason: String?
+    }
+
+    struct RespReading: Codable {
+        var resp_rate: Double?
+        var resp_raw: Double?
+        var error_bpm: Double?
+        var range_low: Double?
+        var range_high: Double?
+        var method: String?
+        var confidence: Double?
+        var rr_derived: Double?
+        var strap: Double?
+        var strap_usable: Bool?
+        var sources_agree: Bool?
+        var sleep_stage: String?
+        var activity_state: String?
+        var reason: String?
+    }
+
+    struct BiostateNow: Codable {
+        var experimental: Bool?
+        var ts: String?
+        var arousal: ArousalReading?
+        var drunk: DrunkReading?
+        var respiration: RespReading?
+    }
+
+    /// One round-trip live read of all three detectors. persist=true keeps the
+    /// server's live biostate_state fresh.
+    func fetchBiostateNow() async -> BiostateNow? {
+        do { try await ensureAuth() } catch { return nil }
+        guard let token = accessToken else { return nil }
+        let urlStr = "\(baseURL)/rest/v1/rpc/biostate_all_now"
+        guard let url = URL(string: urlStr) else { return nil }
+        var req = URLRequest(url: url)
+        req.httpMethod = "POST"
+        req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        req.setValue(anonKey, forHTTPHeaderField: "apikey")
+        req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        // empty body → function defaults (p_user=Fabi, p_end=now(), p_persist=true)
+        let body: [String: Any] = ["p_persist": true]
+        do {
+            req.httpBody = try JSONSerialization.data(withJSONObject: body)
+            let (data, _) = try await URLSession.shared.data(for: req)
+            return try? JSONDecoder().decode(BiostateNow.self, from: data)
+        } catch { return nil }
+    }
+
+    /// Log a ground-truth correction. detector ∈ {arousal,drunk,respiration}.
+    /// Server logs it to state_truth_log and (if the window is clean) updates the
+    /// namespaced biostate_* priors. Returns true on success.
+    @discardableResult
+    func logStateCorrection(detector: String,
+                            correctedState: String? = nil,
+                            correctedValue: Double? = nil,
+                            note: String? = nil) async -> Bool {
+        do { try await ensureAuth() } catch { return false }
+        guard let token = accessToken else { return false }
+        let urlStr = "\(baseURL)/rest/v1/rpc/log_state_correction"
+        guard let url = URL(string: urlStr) else { return false }
+        var req = URLRequest(url: url)
+        req.httpMethod = "POST"
+        req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        req.setValue(anonKey, forHTTPHeaderField: "apikey")
+        req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        var body: [String: Any] = ["p_detector": detector]
+        if let s = correctedState { body["p_corrected_state"] = s }
+        if let v = correctedValue { body["p_corrected_value"] = v }
+        if let n = note { body["p_note"] = n }
+        do {
+            req.httpBody = try JSONSerialization.data(withJSONObject: body)
+            let (_, response) = try await URLSession.shared.data(for: req)
+            return ((response as? HTTPURLResponse)?.statusCode ?? 0) < 300
+        } catch { return false }
+    }
+
+    struct BiostateHistoryPoint: Codable, Identifiable {
+        var id: Int
+        var ts: String
+        var arousal: Double?
+        var arousal_band: String?
+        var drunk_stage: Int?
+        var resp_rate: Double?
+        var hr: Double?
+        var rmssd: Double?
+        var quality: Double?
+        var has_signal: Bool?
+    }
+
+    /// Week-graph data: the 15-min cron samples over the last `hours`.
+    func fetchBiostateHistory(hours: Int = 168) async -> [BiostateHistoryPoint] {
+        do { try await ensureAuth() } catch { return [] }
+        guard let token = accessToken else { return [] }
+        let cutoff = ISO8601DateFormatter().string(from: Date().addingTimeInterval(-Double(hours) * 3600))
+        let sel = "id,ts,arousal,arousal_band,drunk_stage,resp_rate,hr,rmssd,quality,has_signal"
+        let urlStr = "\(baseURL)/rest/v1/biostate_history?user_id=eq.\(userId)&ts=gte.\(cutoff)&order=ts.asc&select=\(sel)"
+        guard let url = URL(string: urlStr) else { return [] }
+        var req = URLRequest(url: url)
+        req.setValue(anonKey, forHTTPHeaderField: "apikey")
+        req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        do {
+            let (data, _) = try await URLSession.shared.data(for: req)
+            return (try? JSONDecoder().decode([BiostateHistoryPoint].self, from: data)) ?? []
+        } catch { return [] }
+    }
+
+    struct TruthLogEntry: Codable, Identifiable {
+        var id: String
+        var ts: String
+        var detector: String
+        var detected_state: String?
+        var detected_value: Double?
+        var corrected_state: String?
+        var corrected_value: Double?
+        var note: String?
+    }
+
+    /// Recent ground-truth corrections — the training timeline.
+    func fetchTruthLog(limit: Int = 25) async -> [TruthLogEntry] {
+        do { try await ensureAuth() } catch { return [] }
+        guard let token = accessToken else { return [] }
+        let sel = "id,ts,detector,detected_state,detected_value,corrected_state,corrected_value,note"
+        let urlStr = "\(baseURL)/rest/v1/state_truth_log?user_id=eq.\(userId)&order=ts.desc&limit=\(limit)&select=\(sel)"
+        guard let url = URL(string: urlStr) else { return [] }
+        var req = URLRequest(url: url)
+        req.setValue(anonKey, forHTTPHeaderField: "apikey")
+        req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        do {
+            let (data, _) = try await URLSession.shared.data(for: req)
+            return (try? JSONDecoder().decode([TruthLogEntry].self, from: data)) ?? []
+        } catch { return [] }
+    }
 }
