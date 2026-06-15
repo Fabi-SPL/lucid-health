@@ -14,6 +14,7 @@ struct InsightsView: View {
     @State private var confidenceFilter: FoodPattern.ConfidenceTier? = nil  // All — show strongest real patterns first
     @State private var showCoherenceDrill = false
     @State private var showBiostate = false
+    @State private var biostateInitialCorrect: BiostateDetector? = nil
     @State private var lastNight: SleepRestlessness? = nil
     @State private var illness: IllnessRisk? = nil
 
@@ -146,7 +147,11 @@ struct InsightsView: View {
                 .environmentObject(bleManager)
         }
         .fullScreenCover(isPresented: $showBiostate) {
-            BiostateDashboardView()
+            BiostateDashboardView(initialCorrect: biostateInitialCorrect)
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .lucidOpenBiostate)) { note in
+            biostateInitialCorrect = (note.object as? String).flatMap { BiostateDetector(rawValue: $0) }
+            showBiostate = true
         }
     }
 

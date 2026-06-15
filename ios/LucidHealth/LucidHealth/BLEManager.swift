@@ -4165,6 +4165,9 @@ extension BLEManager: CBPeripheralDelegate {
                 healthEngine.updateStrain(hr: Int(reading.heartRate))
                 healthEngine.updateBodyBattery(hr: Int(reading.heartRate))
 
+                // EXPERIMENTAL biostate: throttled (5-min) change-check → lockscreen notif
+                BiostateNotifier.shared.noteTick()
+
                 // Track daytime HR for nocturnal dip calculation (awake + no exercise)
                 if !healthEngine.sleepDetected && manualActivityType == nil {
                     healthEngine.addDaytimeHRReading(Double(reading.heartRate))
