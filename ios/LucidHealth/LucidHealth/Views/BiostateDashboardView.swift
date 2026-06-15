@@ -39,6 +39,10 @@ enum BiostateDetector: String, Identifiable {
 }
 
 struct BiostateDashboardView: View {
+    /// When set (e.g. opened from a change-notification's "Open & fix"), the
+    /// matching correction sheet auto-presents once data loads.
+    var initialCorrect: BiostateDetector? = nil
+
     @Environment(\.dismiss) private var dismiss
     private let svc = ExperimentalFeaturesService.shared
 
@@ -90,7 +94,10 @@ struct BiostateDashboardView: View {
                 }
             }
         }
-        .task { await loadAll() }
+        .task {
+            await loadAll()
+            if let d = initialCorrect { correcting = d }
+        }
         .sheet(item: $correcting) { det in
             BiostateCorrectionSheet(detector: det, now: now) { state, value, note in
                 await submitCorrection(det, state: state, value: value, note: note)

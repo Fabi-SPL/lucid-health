@@ -91,6 +91,7 @@
 		LH000074 /* LucidLog.swift in Sources */ = {isa = PBXBuildFile; fileRef = LH100074; };
 		LH000075 /* LogViewerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = LH100075; };
 		LH000070 /* ExperimentalFeaturesService.swift in Sources */ = {isa = PBXBuildFile; fileRef = LH100070; };
+		LH0000B1 /* BiostateNotifier.swift in Sources */ = {isa = PBXBuildFile; fileRef = LH1000B1; };
 		LH000071 /* ExperimentalCards.swift in Sources */ = {isa = PBXBuildFile; fileRef = LH100071; };
 		LH000072 /* CoherenceDrillView.swift in Sources */ = {isa = PBXBuildFile; fileRef = LH100072; };
 		LH000201 /* WindDownView.swift in Sources */ = {isa = PBXBuildFile; fileRef = LH100201; };
@@ -220,6 +221,7 @@
 		LH100074 /* LucidLog.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Models/LucidLog.swift; sourceTree = "<group>"; };
 		LH100075 /* LogViewerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LogViewerView.swift; sourceTree = "<group>"; };
 		LH100070 /* ExperimentalFeaturesService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Services/ExperimentalFeaturesService.swift; sourceTree = "<group>"; };
+		LH1000B1 /* BiostateNotifier.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Services/BiostateNotifier.swift; sourceTree = "<group>"; };
 		LH100071 /* ExperimentalCards.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ExperimentalCards.swift; sourceTree = "<group>"; };
 		LH100072 /* CoherenceDrillView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CoherenceDrillView.swift; sourceTree = "<group>"; };
 		LH100201 /* WindDownView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WindDownView.swift; sourceTree = "<group>"; };
@@ -299,6 +301,7 @@
 				LH10001C /* GeminiClient.swift */,
 				LH10001D /* OpenFoodFactsClient.swift */,
 				LH100070 /* ExperimentalFeaturesService.swift */,
+				LH1000B1 /* BiostateNotifier.swift */,
 				LH10001E /* lucid-warm.caf */,
 				LH10001F /* lucid-halo.caf */,
 				LH100007 /* Assets.xcassets */,
@@ -579,6 +582,7 @@
 				LH00006D /* SwipeActionsCard.swift in Sources */,
 				LH00006E /* EditFoodEntrySheet.swift in Sources */,
 				LH000070 /* ExperimentalFeaturesService.swift in Sources */,
+				LH0000B1 /* BiostateNotifier.swift in Sources */,
 				LH000071 /* ExperimentalCards.swift in Sources */,
 				LH000072 /* CoherenceDrillView.swift in Sources */,
 				LH000201 /* WindDownView.swift in Sources */,
