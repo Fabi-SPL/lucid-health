@@ -3123,6 +3123,29 @@ extension BLEManager: CBPeripheralDelegate {
             let foodName = (displayName?.isEmpty == false) ? displayName! : activityName(type)
             Task { await self.mirrorIntakeToFoodEntries(name: foodName, at: tapTime, type: type) }
         }
+
+        // EXPERIMENTAL biostate: a mood tag IS a ground-truth arousal label, so feed
+        // it to the arousal detector as a correction. The server learn-guard ignores
+        // noisy/artifact windows, so awake-motion taps log but won't poison baselines.
+        if category == "mood", let label = Self.arousalLabel(for: type) {
+            let note = "mood tag: \(displayName ?? type)"
+            Task {
+                await ExperimentalFeaturesService.shared.logStateCorrection(
+                    detector: "arousal", correctedState: label.state, correctedValue: label.value, note: note)
+            }
+        }
+    }
+
+    /// Maps a Mood quick-tag type → an arousal ground-truth label (0-10, 5=baseline).
+    /// Used to train the EXPERIMENTAL arousal detector from double-tap mood logs.
+    static func arousalLabel(for type: String) -> (state: String, value: Double)? {
+        switch type {
+        case "stress_spike", "anxiety": return ("high_arousal", 8)
+        case "hyperfocus":              return ("elevated", 7)
+        case "good_mood":               return ("neutral", 5)
+        case "low_mood":                return ("relaxed", 3)
+        default:                        return nil
+        }
     }
 
     /// Log a free-text custom event — Lucid auto-categorizes with emoji + type
