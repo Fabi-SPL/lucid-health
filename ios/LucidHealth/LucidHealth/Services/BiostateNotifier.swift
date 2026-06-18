@@ -31,6 +31,8 @@ final class BiostateNotifier: NSObject, UNUserNotificationCenterDelegate {
     private var checking = false
     private var lastCheck = Date.distantPast
     private let minInterval: TimeInterval = 300   // 5-min throttle (also the max notif rate/detector)
+    private let stateQueue = DispatchQueue(label: "com.lucid.biostate-notifier")  // serialises throttle state (BLE thread vs Task pool)
+    private weak var previousDelegate: UNUserNotificationCenterDelegate?           // chain, never steal
 
     private static let catArousal = "BIOSTATE_AROUSAL"
     private static let catDrunk   = "BIOSTATE_DRUNK"
@@ -41,18 +43,26 @@ final class BiostateNotifier: NSObject, UNUserNotificationCenterDelegate {
 
     // MARK: - Activation
 
-    /// Idempotent. Registers categories + claims the notification delegate.
+    /// Idempotent. Registers categories + claims the notification delegate (on main, once).
     func activate() {
-        guard !activated else { return }
-        activated = true
-        registerCategories()
-        ensureDelegate()
+        let firstTime: Bool = stateQueue.sync {
+            guard !activated else { return false }
+            activated = true
+            return true
+        }
+        guard firstTime else { return }
+        // UN APIs + delegate claim on main → race-free vs app launch's AppDelegate delegate set
+        DispatchQueue.main.async { [weak self] in
+            self?.registerCategories()
+            self?.ensureDelegate()
+        }
     }
 
     private func ensureDelegate() {
         let center = UNUserNotificationCenter.current()
         if !(center.delegate is BiostateNotifier) {
-            center.delegate = self   // willPresent below replicates prior behavior
+            previousDelegate = center.delegate   // remember whom we displaced, to forward their taps
+            center.delegate = self               // willPresent below replicates prior behavior
         }
     }
 
@@ -85,21 +95,24 @@ final class BiostateNotifier: NSObject, UNUserNotificationCenterDelegate {
     // MARK: - Throttled tick (called from the BLE HR handler)
 
     func noteTick() {
-        if !activated { activate() }
-        let now = Date()
-        guard !checking, now.timeIntervalSince(lastCheck) >= minInterval else { return }
-        lastCheck = now
-        checking = true
+        activate()   // idempotent; claims delegate on main the first time
+        let proceed: Bool = stateQueue.sync {
+            let now = Date()
+            guard !checking, now.timeIntervalSince(lastCheck) >= minInterval else { return false }
+            lastCheck = now
+            checking = true
+            return true
+        }
+        guard proceed else { return }
         Task {
             await checkAndNotify()
-            checking = false
+            stateQueue.sync { self.checking = false }
         }
     }
 
     // MARK: - Change detection
 
     func checkAndNotify() async {
-        ensureDelegate()
         guard let s = await svc.fetchBiostateNow() else { return }
 
         if let a = s.arousal, a.arousal != nil, let band = a.band, band != "unknown" {
@@ -163,7 +176,15 @@ final class BiostateNotifier: NSObject, UNUserNotificationCenterDelegate {
                                 didReceive response: UNNotificationResponse,
                                 withCompletionHandler completionHandler: @escaping () -> Void) {
         let info = response.notification.request.content.userInfo
-        guard let detector = info["detector"] as? String else { completionHandler(); return }
+        guard let detector = info["detector"] as? String else {
+            // not a biostate notification — forward to the delegate we displaced
+            // (future alarm / cognitive action buttons keep working)
+            if let prev = previousDelegate {
+                prev.userNotificationCenter?(center, didReceive: response, withCompletionHandler: completionHandler)
+                    ?? completionHandler()
+            } else { completionHandler() }
+            return
+        }
         let action = response.actionIdentifier
 
         // deep-link to the dashboard for nuanced correction
