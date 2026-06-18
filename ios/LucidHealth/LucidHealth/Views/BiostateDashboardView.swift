@@ -230,7 +230,7 @@ struct BiostateDashboardView: View {
                         )
                         .foregroundStyle(DS.Colors.violet.opacity(0.06))
                     }
-                    ForEach(graphPoints, id: \.date) { pt in
+                    ForEach(graphPoints) { pt in
                         LineMark(x: .value("t", pt.date), y: .value("v", pt.value))
                             .interpolationMethod(graphMetric == .drunk ? .stepCenter : .catmullRom)
                             .lineStyle(StrokeStyle(lineWidth: 2, lineCap: .round))
@@ -238,7 +238,7 @@ struct BiostateDashboardView: View {
                                 LinearGradient(colors: [graphTint.opacity(0.85), graphTint],
                                                startPoint: .leading, endPoint: .trailing)
                             )
-                        if pt.date == graphPoints.last?.date {
+                        if pt.id == graphPoints.last?.id {
                             PointMark(x: .value("t", pt.date), y: .value("v", pt.value))
                                 .symbolSize(34).foregroundStyle(graphTint)
                         }
@@ -287,7 +287,13 @@ struct BiostateDashboardView: View {
         }
     }
 
-    private var graphPoints: [(date: Date, value: Double)] {
+    private struct GraphPoint: Identifiable {
+        let id: Int        // biostate_history primary key — unique even if two rows share a ts
+        let date: Date
+        let value: Double
+    }
+
+    private var graphPoints: [GraphPoint] {
         history.compactMap { p in
             guard let d = parseDate(p.ts) else { return nil }
             let v: Double?
@@ -297,7 +303,7 @@ struct BiostateDashboardView: View {
             case .respiration: v = p.resp_rate
             }
             guard let vv = v else { return nil }
-            return (d, vv)
+            return GraphPoint(id: p.id, date: d, value: vv)
         }
     }
 
