@@ -1360,6 +1360,66 @@ enum QuickLogSource: Identifiable {
 }
 
 /// Lightweight pre-filled meal builder. Opens on a quick-log tap so an accidental
+/// Subjective, body-relative portion size. "Normal" = your usual amount of THIS
+/// food — the server learns what that means in grams from your own history per
+/// food + body weight. The factor scales quick-log calorie baselines and hands
+/// Hermes a dose dimension so it can separate "what" you ate from "how much".
+enum PortionSize: String, CaseIterable, Identifiable {
+    case tiny, small, normal, big, huge
+    var id: String { rawValue }
+    var label: String {
+        switch self {
+        case .tiny: return "Tiny"
+        case .small: return "Small"
+        case .normal: return "Normal"
+        case .big: return "Big"
+        case .huge: return "Huge"
+        }
+    }
+    /// Multiplier vs your baseline serving (matches v138 column comment).
+    var factor: Double {
+        switch self {
+        case .tiny: return 0.5
+        case .small: return 0.75
+        case .normal: return 1.0
+        case .big: return 1.5
+        case .huge: return 2.0
+        }
+    }
+}
+
+/// 5-pill relative-portion selector. Reused by the quick-log editor and the
+/// typed-meal sheet (file-scope `internal`, so no new file / no pbxproj edit).
+struct PortionSizePicker: View {
+    @Binding var selection: PortionSize
+
+    var body: some View {
+        HStack(spacing: 6) {
+            ForEach(PortionSize.allCases) { size in
+                let isOn = size == selection
+                Button {
+                    DS.Haptic.tap()
+                    withAnimation(.easeOut(duration: 0.16)) { selection = size }
+                } label: {
+                    Text(size.label)
+                        .font(.system(size: 12, weight: isOn ? .bold : .medium, design: .rounded))
+                        .foregroundStyle(isOn ? .white : DS.Colors.textSecondary)
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 9)
+                        .background(
+                            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                                .fill(isOn ? DS.Colors.violet : DS.Colors.surface)
+                                .overlay(RoundedRectangle(cornerRadius: 10, style: .continuous)
+                                    .stroke(isOn ? Color.clear : DS.Colors.border, lineWidth: 0.5))
+                        )
+                        .scaleEffect(isOn ? 1.0 : 0.97)
+                }
+                .buttonStyle(.plain)
+            }
+        }
+    }
+}
+
 /// touch never writes a junk entry — you confirm (and can tweak amount/kcal/time)
 /// before it saves. Espresso defaults to Fabi's measured 80ml cup.
 private struct QuickLogEditorSheet: View {
@@ -1375,6 +1435,7 @@ private struct QuickLogEditorSheet: View {
     @State private var eatenAt: Date = Date()
     @State private var isSaving = false
     @State private var error: String?
+    @State private var portion: PortionSize = .normal
 
     @Environment(\.dismiss) private var dismiss
 
@@ -1486,6 +1547,14 @@ private struct QuickLogEditorSheet: View {
                     Text("kcal").font(.system(size: 11)).foregroundStyle(DS.Colors.textFaint)
                 }
             }
+            VStack(alignment: .leading, spacing: 4) {
+                Text("PORTION")
+                    .font(.system(size: 9, weight: .bold))
+                    .foregroundStyle(DS.Colors.textFaint)
+                    .tracking(1)
+                PortionSizePicker(selection: $portion)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
             if showCaffeine {
                 fieldRow(label: "CAFFEINE") {
                     HStack {
@@ -1608,10 +1677,15 @@ private struct QuickLogEditorSheet: View {
                 let amt = amountText.trimmingCharacters(in: .whitespaces)
                 if !amt.isEmpty && amt.lowercased() != "1 serving" { notes.append(amt) }
                 if showCaffeine && caffeine > 0 { notes.append("~\(caffeine)mg caffeine") }
+                if portion != .normal { notes.append("\(portion.label.lowercased()) portion") }
                 let caption = notes.isEmpty ? name : "\(name) · \(notes.joined(separator: " · "))"
                 var tags = item.mindTags
                 if showCaffeine && caffeine > 0 && !tags.contains("caffeine") { tags.append("caffeine") }
-                let detected = DetectedItem(name: name, grams: 0, kcal: kcal, novaClass: item.novaClass, mindTags: tags)
+                // Scale the logged calories by the chosen portion — a "huge" pour
+                // of the same drink lands more kcal than a "tiny" one.
+                let factor = portion.factor
+                let scaledKcal = Int((Double(kcal) * factor).rounded())
+                let detected = DetectedItem(name: name, grams: 0, kcal: scaledKcal, novaClass: item.novaClass, mindTags: tags)
                 let entry = FoodEntry(
                     id: nil,
                     userId: SupabaseClient.shared.userId,
@@ -1620,13 +1694,15 @@ private struct QuickLogEditorSheet: View {
                     geminiRawJson: nil,
                     items: [detected],
                     caption: caption,
-                    totalKcal: kcal,
+                    totalKcal: scaledKcal,
                     novaAvg: Double(item.novaClass),
                     mindScore: nil,
                     confidence: "quick_log",
                     source: "quick_log",
                     createdAt: nil,
-                    logQuality: FoodEntry.computeLogQuality(source: "quick_log", confidence: "quick_log", items: [detected])
+                    logQuality: FoodEntry.computeLogQuality(source: "quick_log", confidence: "quick_log", items: [detected]),
+                    portionSize: portion.rawValue,
+                    portionFactor: factor
                 )
                 saved = try await SupabaseClient.shared.saveFoodEntry(entry)
                 // Feed the shared "most used" ranking (also the Whoop double-tap signal).
