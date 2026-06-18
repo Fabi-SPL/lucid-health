@@ -159,10 +159,14 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Copy IPA to public directory
+      - name: Stage IPA for source build (ephemeral — never committed)
         run: |
+          # public/ is gitignored (IPA + source.json untracked for privacy).
+          # mkdir so a fresh checkout has the dir; it's only runner-local staging
+          # for the Supabase upload below, never committed back to the repo.
+          mkdir -p public
           cp $RUNNER_TEMP/LucidHealth.ipa public/LucidHealth.ipa
-          echo "IPA copied to public/"
+          echo "IPA staged in public/ (gitignored; goes to Supabase, not git)"
 
       - name: Update AltStore Source JSON (merge — preserve sibling apps)
         env:
@@ -260,15 +264,11 @@ jobs:
           echo ""
           echo "Storage upload complete."
 
-      - name: Push AltStore Source
-        run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-          git pull --rebase origin main || git pull origin main
-          git add -f public/altstore-source.json public/LucidHealth.ipa
-          git diff --cached --quiet && exit 0
-          git commit -m "AltStore source: LucidHealth build ${{ github.run_number }}"
-          for i in 1 2 3; do
-            git push origin HEAD:main && break
-            git pull --rebase origin main
-          done
+      # NOTE: the old "Push AltStore Source" step was removed deliberately.
+      # It force-committed (git add -f) the IPA + altstore-source.json back into
+      # this PUBLIC repo every build, which re-published the exact artifacts the
+      # security commit (6054aac) untracked. AltStore reads the source + IPA from
+      # Supabase Storage (uploaded above), so the repo copy was redundant AND a
+      # privacy regression. Removing it also kills the bot commits that caused the
+      # recurring "remote ahead" push races. Build artifacts now live only in
+      # Supabase, never in git — matching .gitignore's "never commit (security)".
