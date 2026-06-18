@@ -75,3 +75,7 @@ combined-design-principles.md
 NOTES.md
 PLAN*.md
 TODO.md
+
+# stale altstore artifacts — build uploads to Supabase, never commit (security)
+public/altstore-source.json
+public/altstore-manifests/
