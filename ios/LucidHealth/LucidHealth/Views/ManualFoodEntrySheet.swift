@@ -18,6 +18,12 @@ struct ManualFoodEntrySheet: View {
     @State private var estimate: MealEstimate?
     @State private var isEstimating = false
     @State private var savePhase = "Saving…"
+    @State private var portion: PortionSize = .normal
+
+    // Body profile (shared with Settings) — sizes the meal against your own day.
+    @AppStorage("lucid_user_weight_kg") private var weightKg: Double = 76
+    @AppStorage("lucid_user_height_cm") private var heightCm: Double = 178
+    @AppStorage("lucid_user_age") private var ageYears: Int = 20
 
     @FocusState private var descriptionFocused: Bool
 
@@ -40,6 +46,8 @@ struct ManualFoodEntrySheet: View {
                     descriptionCard
 
                     timeCard
+
+                    portionCard
 
                     if isAnalyzing {
                         analyzingCard
@@ -166,6 +174,20 @@ struct ManualFoodEntrySheet: View {
         .buttonStyle(.plain)
     }
 
+    // MARK: - Portion
+
+    private var portionCard: some View {
+        VStack(alignment: .leading, spacing: DS.Spacing.xs) {
+            sectionLabel("How big a portion?")
+            PortionSizePicker(selection: $portion)
+            Text("Normal = your usual amount. Lucid learns what that means for your body over time.")
+                .font(.system(size: 10))
+                .foregroundStyle(DS.Colors.textMuted)
+        }
+        .glassCard()
+        .padding(.horizontal, DS.Spacing.md)
+    }
+
     // MARK: - Analyzing
 
     private var analyzingCard: some View {
@@ -202,6 +224,12 @@ struct ManualFoodEntrySheet: View {
                     .font(.system(size: 10, weight: .medium))
                     .foregroundStyle(DS.Colors.textFaint)
                     .padding(.top, 4)
+            }
+            if let line = bodyContextLine(kcal: totals.caloriesMidpoint, proteinG: totals.proteinG) {
+                Text(line)
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundStyle(DS.Colors.violet)
+                    .padding(.top, 2)
             }
         }
         .glassCard()
@@ -387,6 +415,22 @@ struct ManualFoodEntrySheet: View {
         analyze()
     }
 
+    /// "≈ 32% of your day · 41g protein (0.5 g/kg)" — meal sized against your own
+    /// TDEE + body weight (Mifflin-St Jeor BMR, moderate activity ×1.55).
+    private func bodyContextLine(kcal: Int?, proteinG: Double?) -> String? {
+        guard weightKg > 0 else { return nil }
+        let bmr = 10 * weightKg + 6.25 * heightCm - 5 * Double(ageYears) + 5
+        let tdee = bmr * 1.55
+        var parts: [String] = []
+        if let k = kcal, tdee > 0 {
+            parts.append("≈ \(Int((Double(k) / tdee * 100).rounded()))% of your day")
+        }
+        if let p = proteinG {
+            parts.append(String(format: "%.0fg protein (%.1f g/kg)", p, p / weightKg))
+        }
+        return parts.isEmpty ? nil : parts.joined(separator: " · ")
+    }
+
     private func saveEntry() {
         DS.Haptic.commit()
         isSaving = true
@@ -436,7 +480,9 @@ struct ManualFoodEntrySheet: View {
                     confidence: confidence,
                     source: source,
                     createdAt: nil,
-                    logQuality: FoodEntry.computeLogQuality(source: source, confidence: confidence, items: items)
+                    logQuality: FoodEntry.computeLogQuality(source: source, confidence: confidence, items: items),
+                    portionSize: portion.rawValue,
+                    portionFactor: portion.factor
                 )
 
                 let saved = try await supabase.saveFoodEntry(entry)

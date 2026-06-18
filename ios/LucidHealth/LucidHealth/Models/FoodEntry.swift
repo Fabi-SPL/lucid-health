@@ -105,6 +105,8 @@ struct FoodEntry: Codable, Identifiable {
     var source: String
     var createdAt: Date?
     var logQuality: Int? = nil       // 1-10: how reliably this was logged (see computeLogQuality)
+    var portionSize: String? = nil   // subjective relative size: tiny|small|normal|big|huge
+    var portionFactor: Double? = nil // multiplier vs baseline (tiny .5 / normal 1 / huge 2)
 
     enum CodingKeys: String, CodingKey {
         case id
@@ -121,6 +123,8 @@ struct FoodEntry: Codable, Identifiable {
         case source
         case createdAt = "created_at"
         case logQuality = "log_quality"
+        case portionSize = "portion_size"
+        case portionFactor = "portion_factor"
     }
 
     /// Log-quality score 1-10 — how trustworthy the data behind this entry is,
