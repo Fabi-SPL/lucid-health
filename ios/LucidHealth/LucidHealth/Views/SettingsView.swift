@@ -816,6 +816,7 @@ private struct DataSyncCard: View {
 
 private struct ManualBackfillCard: View {
     @ObservedObject var bleManager: BLEManager
+    @State private var showFlushConfirm = false
 
     private var isRunning: Bool {
         switch bleManager.manualBackfillState {
@@ -906,6 +907,54 @@ private struct ManualBackfillCard: View {
                 Text("Connect the strap first to enable.")
                     .font(.system(size: 10, design: .rounded))
                     .foregroundStyle(DS.Colors.textFaint)
+            }
+
+            // ── Escape hatch: flush a stuck buffer ──────────────────────────
+            // If Backfill keeps returning 0 new minutes, the strap is likely
+            // stuck re-serving a dead ancient buffer region. Wiping it forces a
+            // clean re-dump. Destructive + irreversible → confirm first.
+            Divider().overlay(DS.Colors.border)
+
+            if !bleManager.historyFlushResult.isEmpty {
+                Text(bleManager.historyFlushResult)
+                    .font(.system(size: 12, weight: .medium, design: .rounded))
+                    .foregroundStyle(bleManager.historyFlushState == "failed" ? DS.Colors.danger : DS.Colors.amber)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
+            Text("Backfill keeps pulling nothing? The strap may be stuck on an old dead buffer. Wiping it forces a clean re-dump. This erases the strap's internal history — live tracking is unaffected — and can't be undone.")
+                .font(.system(size: 11, design: .rounded))
+                .foregroundStyle(DS.Colors.textFaint)
+                .fixedSize(horizontal: false, vertical: true)
+
+            Button(role: .destructive) {
+                showFlushConfirm = true
+            } label: {
+                HStack(spacing: 8) {
+                    Image(systemName: "trash.fill")
+                        .font(.system(size: 12, weight: .bold))
+                    Text(bleManager.historyFlushState == "erasing" ? "Flushing…" : "Flush stuck history")
+                        .font(.system(size: 12, weight: .semibold, design: .rounded))
+                }
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 9)
+                .background(
+                    Capsule().fill(DS.Colors.amber.opacity(0.12))
+                        .overlay(Capsule().stroke(DS.Colors.amber.opacity(0.4), lineWidth: 0.5))
+                )
+                .foregroundStyle(DS.Colors.amber)
+            }
+            .buttonStyle(.plain)
+            .disabled(isRunning || bleManager.connectionState != .streaming || bleManager.historyFlushState == "erasing")
+            .confirmationDialog("Wipe the strap's history buffer?", isPresented: $showFlushConfirm, titleVisibility: .visible) {
+                Button("Flush + re-pull", role: .destructive) {
+                    let h = UINotificationFeedbackGenerator()
+                    h.notificationOccurred(.warning)
+                    bleManager.flushHistoryBuffer()
+                }
+                Button("Cancel", role: .cancel) {}
+            } message: {
+                Text("This erases the data the strap is holding in its internal buffer, then pulls a fresh 72h backfill. Live tracking keeps working. This cannot be undone.")
             }
         }
         .padding(DS.Spacing.lg)

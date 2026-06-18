@@ -66,6 +66,8 @@ class BLEManager: NSObject, ObservableObject {
     @Published var manualBackfillState: String = "idle"        // idle | querying | requesting | parsing | uploading | done | failed
     @Published var manualBackfillProgress: String = ""
     @Published var manualBackfillResult: String = ""           // human-readable result line for UI
+    @Published var historyFlushState: String = "idle"          // idle | erasing | done | failed
+    @Published var historyFlushResult: String = ""             // human-readable result line for the flush escape-hatch
     private var isManualBackfillMode: Bool = false
     private var manualBackfillExistingMinutes: Set<Int> = []
     private var manualBackfillWindowStart: Date = Date()
@@ -1302,6 +1304,51 @@ class BLEManager: NSObject, ObservableObject {
     /// Safe to call when already streaming — strap will pause to dump history
     /// then resume. Caller should not invoke a second time while one is in
     /// flight (UI button disables itself via manualBackfillState).
+    /// Send the strap's ERASE_HISTORY command (0x19) to wipe its internal flash
+    /// buffer, then auto-kick a fresh 72h backfill once the strap has had a few
+    /// seconds to process the erase.
+    ///
+    /// WHY THIS EXISTS: the strap can get stuck re-serving a dead ancient buffer
+    /// region (off-wrist HR 1-7 from weeks ago). Every history request then returns
+    /// out-of-range garbage and the drain never reaches "now" → 0 backfills for
+    /// days. ERASE is the only documented escape (bWanShiTong RE). Destructive +
+    /// irreversible, but that backlog is worthless off-wrist data so nothing real
+    /// is lost. Live streaming is unaffected (live data never comes from the
+    /// buffer). Manual-trigger only — never automatic.
+    func flushHistoryBuffer() {
+        guard let p = peripheral, let c = cmdToStrap, p.state == .connected else {
+            DispatchQueue.main.async {
+                self.historyFlushState = "failed"
+                self.historyFlushResult = "Strap not connected — connect first."
+            }
+            return
+        }
+
+        DispatchQueue.main.async {
+            self.historyFlushState = "erasing"
+            self.historyFlushResult = ""
+        }
+
+        bleQueue.async { [weak self] in
+            guard let self else { return }
+            p.writeValue(WhoopProtocol.eraseHistoryPacket(), for: c, type: .withResponse)
+            self.evt("history_erase_sent", "cmd=0x19 trigger=manual-flush")
+            self.log("\u{26A0}\u{FE0F} ERASE_HISTORY (0x19) sent — wiping strap flash buffer")
+
+            DispatchQueue.main.async {
+                self.historyFlushState = "done"
+                self.historyFlushResult = "Buffer wiped. Pulling fresh history in 5s…"
+            }
+
+            // Give the strap time to process the erase before re-dumping, then
+            // auto-run the standard 72h backfill from a now-clean buffer.
+            self.bleQueue.asyncAfter(deadline: .now() + 5) { [weak self] in
+                guard let self else { return }
+                DispatchQueue.main.async { self.manualBackfill72h() }
+            }
+        }
+    }
+
     func manualBackfill72h() {
         guard !isManualBackfillMode else {
             log("manualBackfill72h: already in progress — ignoring")

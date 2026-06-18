@@ -33,6 +33,7 @@ enum WhoopCommand: UInt8 {
     case getClock                 = 11
     case sendHistoricalData       = 22
     case historyAck               = 23
+    case eraseHistory             = 25   // 0x19 ERASE_HISTORY — wipes the strap's internal flash buffer (DESTRUCTIVE)
     case getBatteryLevel          = 26
     case getHelloHarvard          = 35
     case startRawData             = 81   // Activate raw optical (PPG) stream → type-43
@@ -368,6 +369,16 @@ struct WhoopProtocol {
     /// Request the strap to send its stored history buffer
     static func requestHistoryPacket() -> Data {
         buildPacket(type: .command, cmd: .sendHistoricalData, data: Data([0x00]))
+    }
+
+    /// Erase the strap's internal history buffer (0x19 ERASE_HISTORY).
+    /// Reference frame (bWanShiTong RE): aa1000..23..19 fe×8 00 ..crc32 — payload is
+    /// 8 bytes of 0xFE padding + 1 zero byte. DESTRUCTIVE + irreversible. Only used to
+    /// clear a stuck/dead backlog the strap keeps re-serving (off-wrist garbage that
+    /// blocks the drain from ever reaching "now"). Live streaming is unaffected.
+    static func eraseHistoryPacket() -> Data {
+        buildPacket(type: .command, cmd: .eraseHistory,
+                    data: Data([0xfe, 0xfe, 0xfe, 0xfe, 0xfe, 0xfe, 0xfe, 0xfe, 0x00]))
     }
 
     /// Acknowledge a history batch and request the next one
