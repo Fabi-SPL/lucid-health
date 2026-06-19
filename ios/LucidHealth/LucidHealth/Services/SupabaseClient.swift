@@ -2824,6 +2824,41 @@ extension SupabaseClient {
         }
     }
 
+    /// Log a blood-pressure reading (systolic/diastolic/pulse + optional weight)
+    /// with an event-context tag so the analysis layer can correlate BP against
+    /// caffeine / alcohol / rides / stress. When a weigh-in rides along it also
+    /// updates the canonical user_body_profile weight. Fire-and-forget.
+    func saveBPReading(systolic: Int, diastolic: Int, pulse: Int?, weightKg: Double?,
+                       context: String, notes: String? = nil) async {
+        do {
+            try await ensureAuth()
+            guard let token = accessToken else { return }
+            var body: [String: Any] = [
+                "user_id": userId,
+                "systolic": systolic,
+                "diastolic": diastolic,
+                "context": context,
+                "measured_at": ISO8601DateFormatter().string(from: Date())
+            ]
+            if let pulse { body["pulse"] = pulse }
+            if let weightKg { body["weight_kg"] = weightKg }
+            if let notes { body["notes"] = notes }
+            let url = URL(string: "\(baseURL)/rest/v1/blood_pressure_readings")!
+            var req = URLRequest(url: url)
+            req.httpMethod = "POST"
+            req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+            req.setValue(anonKey, forHTTPHeaderField: "apikey")
+            req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+            req.setValue("return=minimal", forHTTPHeaderField: "Prefer")
+            req.httpBody = try JSONSerialization.data(withJSONObject: body)
+            let (_, resp) = try await session.data(for: req)
+            log("BP saved (\(systolic)/\(diastolic)) → HTTP \((resp as? HTTPURLResponse)?.statusCode ?? 0)")
+            if let weightKg { await saveBodyProfile(weightKg: weightKg, heightCm: nil, age: nil, sex: nil) }
+        } catch {
+            log("saveBPReading error: \(error.localizedDescription)")
+        }
+    }
+
     /// Post-prandial HR response for a logged meal (server meal_hr_response RPC).
     /// Returns the raw dict: verdict, pre_hr, post_mean, adj_bump_bpm, note.
     func fetchMealHrResponse(mealId: String) async -> [String: Any]? {

@@ -17,6 +17,7 @@ struct QuickTagSheet: View {
     @ObservedObject private var history = QuickLogHistory.shared
     @State private var customText: String = ""
     @State private var lastLogged: String?
+    @State private var showBPSheet = false
     @FocusState private var inputFocused: Bool
 
     private let categories: [QuickLogCategory] = [
@@ -86,6 +87,9 @@ struct QuickTagSheet: View {
                         categorySection(cat)
                     }
 
+                    // 3. Measurements — numeric editor, not one-tap
+                    measureSection
+
                     Color.clear.frame(height: DS.Spacing.lg)
                 }
                 .padding(.horizontal, DS.Spacing.md)
@@ -130,6 +134,7 @@ struct QuickTagSheet: View {
                     .transition(.move(edge: .top).combined(with: .opacity))
             }
         }
+        .sheet(isPresented: $showBPSheet) { BPLogSheet() }
     }
 
     // MARK: - Sections
@@ -228,6 +233,50 @@ struct QuickTagSheet: View {
         .buttonStyle(.plain)
     }
 
+    @ViewBuilder
+    private var measureSection: some View {
+        VStack(alignment: .leading, spacing: DS.Spacing.sm) {
+            HStack(spacing: 6) {
+                Circle().fill(DS.Colors.violet).frame(width: 6, height: 6)
+                Text("MEASURE")
+                    .font(.system(size: 9, weight: .bold))
+                    .foregroundStyle(DS.Colors.textFaint)
+                    .tracking(1.0)
+            }
+            Button {
+                let h = UIImpactFeedbackGenerator(style: .light); h.impactOccurred()
+                showBPSheet = true
+            } label: {
+                HStack(spacing: 10) {
+                    Text("💓").font(.system(size: 22))
+                    VStack(alignment: .leading, spacing: 1) {
+                        Text("Blood pressure & weight")
+                            .font(.system(size: 13, weight: .semibold, design: .rounded))
+                            .foregroundStyle(DS.Colors.textPrimary)
+                        Text("Sys / dia / pulse + a context tag")
+                            .font(.system(size: 10))
+                            .foregroundStyle(DS.Colors.textMuted)
+                    }
+                    Spacer()
+                    Image(systemName: "chevron.right")
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundStyle(DS.Colors.textFaint)
+                }
+                .padding(.horizontal, 14)
+                .padding(.vertical, 12)
+                .background(
+                    RoundedRectangle(cornerRadius: DS.Radius.md, style: .continuous)
+                        .fill(DS.Colors.surface)
+                        .overlay(
+                            RoundedRectangle(cornerRadius: DS.Radius.md, style: .continuous)
+                                .stroke(DS.Colors.violet.opacity(0.18), lineWidth: 0.5)
+                        )
+                )
+            }
+            .buttonStyle(.plain)
+        }
+    }
+
     private func savedToast(text: String) -> some View {
         HStack(spacing: 6) {
             Image(systemName: "checkmark.circle.fill")
@@ -295,4 +344,151 @@ private struct QuickLogCategory: Identifiable {
     /// (emoji, label, canonical name, BLE type, BLE category)
     let items: [(String, String, String, String, String)]
     var id: String { label }
+}
+
+/// Numeric editor for a blood-pressure reading + optional weigh-in. Opened from
+/// QuickTagSheet's MEASURE chip. Writes to blood_pressure_readings (and mirrors
+/// weight into user_body_profile) via SupabaseClient. The context tag is what
+/// makes the reading correlatable — fasted vs post-caffeine vs post-ride.
+private struct BPLogSheet: View {
+    @Environment(\.dismiss) private var dismiss
+    @AppStorage("lucid_user_weight_kg") private var storedWeight: Double = 75.25
+
+    @State private var sys = ""
+    @State private var dia = ""
+    @State private var pulse = ""
+    @State private var weight = ""
+    @State private var context = "fasted"
+    @State private var saving = false
+    @State private var saved = false
+    @FocusState private var focus: Field?
+
+    private enum Field { case sys, dia, pulse, weight }
+
+    private let contexts: [(String, String)] = [
+        ("fasted",        "🌅 Fasted"),
+        ("post_caffeine", "☕ Caffeine"),
+        ("post_ride",     "🏍️ Ride"),
+        ("post_workout",  "🏋️ Workout"),
+        ("stressed",      "😤 Stressed"),
+        ("post_alcohol",  "🥃 Alcohol"),
+        ("relaxed",       "🧘 Evening"),
+        ("other",         "• Other"),
+    ]
+
+    private var canSave: Bool { (Int(sys) ?? 0) > 0 && (Int(dia) ?? 0) > 0 }
+
+    var body: some View {
+        VStack(spacing: 0) {
+            Capsule().fill(DS.Colors.borderStrong)
+                .frame(width: 42, height: 5)
+                .padding(.top, DS.Spacing.sm).padding(.bottom, DS.Spacing.md)
+
+            Text("Blood pressure")
+                .font(.system(size: 22, weight: .heavy, design: .rounded))
+                .foregroundStyle(DS.Colors.textPrimary)
+            Text("A reading is only useful with its context")
+                .font(.system(size: 11, weight: .medium))
+                .foregroundStyle(DS.Colors.textMuted)
+                .padding(.bottom, DS.Spacing.lg)
+
+            ScrollView(showsIndicators: false) {
+                VStack(spacing: DS.Spacing.lg) {
+                    HStack(alignment: .bottom, spacing: DS.Spacing.md) {
+                        numField("Systolic", "120", $sys, .sys)
+                        Text("/").font(.system(size: 28, weight: .light))
+                            .foregroundStyle(DS.Colors.textFaint).padding(.bottom, 8)
+                        numField("Diastolic", "80", $dia, .dia)
+                    }
+                    HStack(spacing: DS.Spacing.md) {
+                        numField("Pulse", "66", $pulse, .pulse)
+                        numField("Weight kg", "75.2", $weight, .weight)
+                    }
+
+                    VStack(alignment: .leading, spacing: DS.Spacing.sm) {
+                        Text("CONTEXT")
+                            .font(.system(size: 9, weight: .bold))
+                            .foregroundStyle(DS.Colors.textFaint).tracking(1.0)
+                        LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 8), count: 4), spacing: 8) {
+                            ForEach(contexts, id: \.0) { (key, label) in
+                                contextChip(key: key, label: label)
+                            }
+                        }
+                    }
+                }
+                .padding(.horizontal, DS.Spacing.md)
+            }
+
+            Button { save() } label: {
+                Text(saved ? "Saved ✓" : (saving ? "Saving…" : "Log reading"))
+                    .font(.system(size: 15, weight: .bold, design: .rounded))
+                    .foregroundStyle(.white)
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 14)
+                    .background(Capsule().fill(canSave ? (saved ? DS.Colors.success : DS.Colors.violet) : DS.Colors.borderStrong))
+            }
+            .buttonStyle(.plain)
+            .disabled(!canSave || saving)
+            .padding(DS.Spacing.md)
+        }
+        .background(MeshGradientBackground().ignoresSafeArea())
+        .presentationDetents([.medium, .large])
+        .onAppear { focus = .sys }
+    }
+
+    private func numField(_ label: String, _ placeholder: String, _ text: Binding<String>, _ field: Field) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text(label.uppercased())
+                .font(.system(size: 9, weight: .bold))
+                .foregroundStyle(DS.Colors.textFaint).tracking(0.8)
+            TextField(placeholder, text: text)
+                .keyboardType(.decimalPad)
+                .font(.system(size: 26, weight: .bold, design: .rounded))
+                .foregroundStyle(DS.Colors.textPrimary)
+                .focused($focus, equals: field)
+                .padding(.horizontal, 12).padding(.vertical, 10)
+                .background(RoundedRectangle(cornerRadius: DS.Radius.md, style: .continuous).fill(DS.Colors.surface))
+        }
+        .frame(maxWidth: .infinity)
+    }
+
+    private func contextChip(key: String, label: String) -> some View {
+        let active = context == key
+        return Button {
+            let h = UIImpactFeedbackGenerator(style: .light); h.impactOccurred()
+            context = key
+        } label: {
+            Text(label)
+                .font(.system(size: 11, weight: .semibold, design: .rounded))
+                .foregroundStyle(active ? .white : DS.Colors.textSecondary)
+                .lineLimit(1).minimumScaleFactor(0.8)
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 9)
+                .background(Capsule().fill(active ? DS.Colors.violet : DS.Colors.surface))
+        }
+        .buttonStyle(.plain)
+    }
+
+    private func save() {
+        guard canSave else { return }
+        saving = true
+        let w = Double(weight.replacingOccurrences(of: ",", with: "."))
+        let p = Int(pulse)
+        UINotificationFeedbackGenerator().notificationOccurred(.success)
+        Task {
+            await SupabaseClient.shared.saveBPReading(
+                systolic: Int(sys) ?? 0,
+                diastolic: Int(dia) ?? 0,
+                pulse: p,
+                weightKg: w,
+                context: context
+            )
+            if let w, w > 0 { storedWeight = w }
+            await MainActor.run {
+                saving = false
+                saved = true
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.7) { dismiss() }
+            }
+        }
+    }
 }
