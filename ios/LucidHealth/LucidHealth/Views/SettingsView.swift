@@ -992,7 +992,7 @@ private struct DevCard: View {
 /// and strain-per-kg metrics. Persisted via @AppStorage (UserDefaults key
 /// `lucid_user_weight_kg`) so any engine can read it without a singleton.
 private struct PersonalizationCard: View {
-    @AppStorage(PersonalizationCard.weightKey) private var weightKg: Double = 76.0
+    @AppStorage(PersonalizationCard.weightKey) private var weightKg: Double = 75.25
     @AppStorage("lucid_user_height_cm") private var heightCm: Double = 178
     @AppStorage("lucid_user_age") private var ageYears: Int = 20
     @State private var weightText: String = ""
@@ -1021,7 +1021,7 @@ private struct PersonalizationCard: View {
                 iconColor: DS.Colors.violet
             )
 
-            profileRow(label: "Weight", text: $weightText, unit: "kg",  placeholder: "76")
+            profileRow(label: "Weight", text: $weightText, unit: "kg",  placeholder: "75")
             profileRow(label: "Height", text: $heightText, unit: "cm",  placeholder: "178")
             profileRow(label: "Age",    text: $ageText,    unit: "yrs", placeholder: "20")
 
@@ -1054,8 +1054,10 @@ private struct PersonalizationCard: View {
             weightText = formatWeight(weightKg)
             heightText = formatWeight(heightCm)
             ageText = "\(ageYears)"
-            // Sync stored/seeded values to the server on open so the AI is current.
-            Task { await pushProfile() }
+            // Server is the source of truth for weight (your logged baseline).
+            // Don't auto-push the local value on open — a stale device default
+            // (e.g. 76) would overwrite a fresher server weight. The Save button
+            // and the BP/weight logger remain the explicit writers.
         }
     }
 

@@ -21,7 +21,7 @@ struct ManualFoodEntrySheet: View {
     @State private var portion: PortionSize = .normal
 
     // Body profile (shared with Settings) — sizes the meal against your own day.
-    @AppStorage("lucid_user_weight_kg") private var weightKg: Double = 76
+    @AppStorage("lucid_user_weight_kg") private var weightKg: Double = 75.25
     @AppStorage("lucid_user_height_cm") private var heightCm: Double = 178
     @AppStorage("lucid_user_age") private var ageYears: Int = 20
 
