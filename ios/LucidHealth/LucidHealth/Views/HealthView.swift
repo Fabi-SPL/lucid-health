@@ -8,7 +8,6 @@ import Charts
 struct HealthView: View {
     @EnvironmentObject private var bleManager: BLEManager
     @State private var appeared = false
-    @State private var showTimeline = false
     @State private var showSleepAdjust = false
 
     private var engine: HealthEngine { bleManager.healthEngine }
@@ -19,13 +18,17 @@ struct HealthView: View {
                 LazyVStack(spacing: DS.Spacing.lg) {
                     Color.clear.frame(height: DS.Spacing.sm)
 
-                    // FORMAT: PILLS — quick actions (Timeline + Sleep adjust)
+                    // FORMAT: PILLS — quick actions (Sleep adjust)
                     quickActionsRow
                         .padding(.horizontal, DS.Spacing.md)
 
+                    // FORMAT: HERO — Body Battery, the master spine
+                    bodyBatteryHeroSection
+                        .staggerIn(appeared: appeared, index: 0)
+
                     // FORMAT: ROW — live now (biometrics larger)
                     liveNowSection
-                        .staggerIn(appeared: appeared, index: 0)
+                        .staggerIn(appeared: appeared, index: 1)
 
                     // FORMAT: BAR — recovery breakdown
                     recoveryBreakdownSection
@@ -46,10 +49,6 @@ struct HealthView: View {
                     // FORMAT: ZONED BAR + NUMBER — strain & activity
                     strainSection
                         .staggerIn(appeared: appeared, index: 5)
-
-                    // FORMAT: TWIN TILES — body battery + cognitive
-                    bodyBatterySection
-                        .staggerIn(appeared: appeared, index: 6)
 
                     // FORMAT: GAUGE (conditional) — illness signals
                     if engine.illnessRisk > 0 || engine.lastAlcoholImpact > 10 {
@@ -79,26 +78,6 @@ struct HealthView: View {
             }
         }
         .onAppear { withAnimation { appeared = true } }
-        .sheet(isPresented: $showTimeline) {
-            NavigationStack {
-                ActivityView(ble: bleManager)
-                    .navigationBarTitleDisplayMode(.inline)
-                    .toolbar {
-                        ToolbarItem(placement: .principal) {
-                            TwoToneHeadline(
-                                primary: "Timeline",
-                                secondary: " · Today",
-                                font: .system(size: 17, weight: .heavy, design: .rounded)
-                            )
-                        }
-                        ToolbarItem(placement: .navigationBarTrailing) {
-                            Button("Done") { showTimeline = false }
-                                .foregroundStyle(DS.Colors.violet)
-                        }
-                    }
-            }
-            .presentationDetents([.large])
-        }
         .sheet(isPresented: $showSleepAdjust) {
             SleepAdjustSheet(engine: engine, ble: bleManager) {
                 showSleepAdjust = false
@@ -118,24 +97,6 @@ struct HealthView: View {
     @ViewBuilder
     private var quickActionsRow: some View {
         HStack(spacing: DS.Spacing.sm) {
-            Button {
-                DS.Haptic.tap()
-                showTimeline = true
-            } label: {
-                Label("Timeline", systemImage: "clock.arrow.circlepath")
-                    .font(.system(size: 13, weight: .semibold, design: .rounded))
-                    .foregroundStyle(DS.Colors.teal)
-                    .padding(.horizontal, DS.Spacing.md)
-                    .padding(.vertical, DS.Spacing.sm)
-                    .frame(maxWidth: .infinity)
-                    .background(
-                        Capsule()
-                            .fill(DS.Colors.teal.opacity(0.10))
-                            .overlay(Capsule().stroke(DS.Colors.teal.opacity(0.25), lineWidth: 0.5))
-                    )
-            }
-            .buttonStyle(.plain)
-
             // v98 — manual wake-up safety net. Only visible when a sleep session
             // is in progress. Tap forces markSleepEnd + computeRecovery + locks
             // sleep state until 9pm. Solves the Fabi-pattern miss where his
@@ -590,86 +551,99 @@ struct HealthView: View {
         }
     }
 
-    // MARK: - 6. Body Battery (FORMAT: TWIN TILES)
+    // MARK: - Body Battery Hero (FORMAT: HERO — the master spine)
+    // Battery is the one number that integrates everything. It leads Health now;
+    // every section below is a system that feeds it. Cognitive rides along as a
+    // secondary readout. Server-computed (continuous autonomic) — display only.
 
     @ViewBuilder
-    private var bodyBatterySection: some View {
+    private var bodyBatteryHeroSection: some View {
+        let level = engine.bodyBattery
+        let battColor = DS.Colors.bodyBatteryColor(level)
         VStack(alignment: .leading, spacing: DS.Spacing.md) {
             HStack(spacing: DS.Spacing.sm) {
-                CategoryDot(category: .mind)
-                SectionHeader(title: "ENERGY & COGNITION")
+                Image(systemName: "bolt.fill")
+                    .font(.system(size: 12))
+                    .foregroundStyle(DS.Colors.violet)
+                Text("BODY BATTERY")
+                    .font(DS.Font.label)
+                    .foregroundStyle(DS.Colors.textMuted)
+                    .tracking(0.8)
+                AmbientLiveDot(
+                    state: bleManager.connectionState == .connected ? .connected
+                        : (bleManager.connectionState == .scanning ? .scanning : .disconnected)
+                )
+                Spacer()
+                Text(batteryTier(level))
+                    .font(.system(size: 11, weight: .semibold, design: .rounded))
+                    .foregroundStyle(DS.Colors.textSecondary)
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 5)
+                    .background(Capsule().fill(DS.Colors.surface))
+                    .overlay(Capsule().stroke(DS.Colors.border, lineWidth: 0.5))
             }
-            .padding(.horizontal, DS.Spacing.md)
 
-            // Asymmetric layout: Body Battery wide+bar (focal), Cognitive compact chip-row.
-            // lucid-design: kill the AI 2-up identical-tile grid (#14).
-            VStack(spacing: DS.Spacing.sm) {
-                let battColor = DS.Colors.bodyBatteryColor(engine.bodyBattery)
-                VStack(alignment: .leading, spacing: DS.Spacing.sm) {
-                    HStack(alignment: .firstTextBaseline) {
-                        Label("BODY BATTERY", systemImage: "battery.100")
-                            .font(DS.Font.label)
-                            .foregroundStyle(DS.Colors.textFaint)
-                            .tracking(0.6)
-                        Spacer()
-                        HStack(alignment: .firstTextBaseline, spacing: 3) {
-                            Text(engine.bodyBattery > 0 ? "\(Int(engine.bodyBattery))" : "—")
-                                .font(.system(size: 28, weight: .heavy, design: .rounded))
-                                .foregroundStyle(battColor)
-                                .monospacedDigit()
-                                .contentTransition(.numericText())
-                            Text("/ 100")
-                                .font(.system(size: 11))
-                                .foregroundStyle(DS.Colors.textFaint)
-                        }
-                    }
+            HStack(alignment: .firstTextBaseline, spacing: 3) {
+                Text(level > 0 ? "\(Int(level))" : "—")
+                    .font(.system(size: 52, weight: .heavy, design: .rounded))
+                    .foregroundStyle(battColor)
+                    .monospacedDigit()
+                    .contentTransition(.numericText())
+                Text("/ 100")
+                    .font(.system(size: 16, weight: .medium))
+                    .foregroundStyle(DS.Colors.textFaint)
+            }
 
-                    if engine.bodyBattery > 0 {
-                        GeometryReader { geo in
-                            ZStack(alignment: .leading) {
-                                RoundedRectangle(cornerRadius: 4)
-                                    .fill(DS.Colors.surfaceElevated)
-                                    .frame(height: 8)
-                                RoundedRectangle(cornerRadius: 4)
-                                    .fill(battColor)
-                                    .frame(width: geo.size.width * CGFloat(engine.bodyBattery / 100), height: 8)
-                                    .animation(DS.Anim.ringFill, value: engine.bodyBattery)
-                            }
-                        }
-                        .frame(height: 8)
+            if level > 0 {
+                GeometryReader { geo in
+                    ZStack(alignment: .leading) {
+                        Capsule()
+                            .fill(DS.Colors.surfaceElevated)
+                            .frame(height: 11)
+                        Capsule()
+                            .fill(LinearGradient(colors: [DS.Colors.amber, battColor],
+                                                 startPoint: .leading, endPoint: .trailing))
+                            .frame(width: max(8, geo.size.width * CGFloat(min(level, 100) / 100)), height: 11)
+                            .animation(DS.Anim.ringFill, value: level)
                     }
                 }
-                .padding(DS.Spacing.md)
-                .frame(maxWidth: .infinity)
-                .glassDefault()
-
-                // Cognitive — compact chip row, not a competing tile
-                HStack(spacing: DS.Spacing.sm) {
-                    Image(systemName: "brain")
-                        .font(.system(size: 11, weight: .semibold))
-                        .foregroundStyle(DS.Colors.violet)
-                    Text("COGNITIVE")
-                        .font(DS.Font.label)
-                        .foregroundStyle(DS.Colors.textFaint)
-                        .tracking(0.6)
-                    Spacer()
-                    Text(engine.cognitiveCapacity > 0 ? "\(Int(engine.cognitiveCapacity))" : "—")
-                        .font(.system(size: 18, weight: .bold, design: .rounded))
-                        .foregroundStyle(DS.Colors.violet)
-                        .monospacedDigit()
-                        .contentTransition(.numericText())
-                    Text("/ 100")
-                        .font(.system(size: 11))
-                        .foregroundStyle(DS.Colors.textFaint)
-                    if !engine.cognitiveLabel.isEmpty && engine.cognitiveLabel != "—" {
-                        StatusChip(text: engine.cognitiveLabel, style: .violet)
-                    }
-                }
-                .padding(.horizontal, DS.Spacing.md)
-                .padding(.vertical, DS.Spacing.sm)
-                .glassSubtle()
+                .frame(height: 11)
             }
-            .padding(.horizontal, DS.Spacing.md)
+
+            // Cognitive rides along — secondary readout, not a competing tile
+            HStack(spacing: DS.Spacing.sm) {
+                Image(systemName: "brain")
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(DS.Colors.teal)
+                Text("COGNITIVE")
+                    .font(DS.Font.label)
+                    .foregroundStyle(DS.Colors.textMuted)
+                    .tracking(0.6)
+                Spacer()
+                Text(engine.cognitiveCapacity > 0 ? "\(Int(engine.cognitiveCapacity))" : "—")
+                    .font(.system(size: 16, weight: .bold, design: .rounded))
+                    .foregroundStyle(DS.Colors.teal)
+                    .monospacedDigit()
+                    .contentTransition(.numericText())
+                Text("/ 100")
+                    .font(.system(size: 10))
+                    .foregroundStyle(DS.Colors.textFaint)
+                if !engine.cognitiveLabel.isEmpty && engine.cognitiveLabel != "—" {
+                    StatusChip(text: engine.cognitiveLabel, style: .teal)
+                }
+            }
+            .padding(.top, 2)
+        }
+        .heroCard()
+        .padding(.horizontal, DS.Spacing.md)
+    }
+
+    private func batteryTier(_ v: Double) -> String {
+        switch v {
+        case 67...:      return "Charged"
+        case 34..<67:    return "Half tank"
+        case 1..<34:     return "Low"
+        default:         return "—"
         }
     }
 
