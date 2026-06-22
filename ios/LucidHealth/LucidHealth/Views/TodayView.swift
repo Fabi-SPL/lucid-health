@@ -573,12 +573,18 @@ struct TodayView: View {
             RecoveryTrendStrip(scores: recoveryTrend)
                 .padding(.horizontal, DS.Spacing.lg)
 
-            // Recovery context line — PINCH style, pre-baked, no AI narration
-            Text(recoveryContextLine)
-                .font(.system(size: 16, weight: .semibold, design: .rounded))
-                .foregroundStyle(DS.Colors.textSecondary)
-                .multilineTextAlignment(.center)
-                .padding(.bottom, DS.Spacing.sm)
+            // Recovery context line — PINCH style, pre-baked, no AI narration.
+            // Followed by the live "vs your normal" recovery percentile (v110).
+            VStack(spacing: DS.Spacing.sm) {
+                Text(recoveryContextLine)
+                    .font(.system(size: 16, weight: .semibold, design: .rounded))
+                    .foregroundStyle(DS.Colors.textSecondary)
+                    .multilineTextAlignment(.center)
+                if engine.recoveryScore > 0 {
+                    PersonalPercentileChip(metric: "recovery_score", value: engine.recoveryScore)
+                }
+            }
+            .padding(.bottom, DS.Spacing.sm)
         }
         .padding(.horizontal, DS.Spacing.md)
     }
@@ -777,6 +783,7 @@ struct TodayView: View {
                         .font(DS.Font.label)
                         .foregroundStyle(DS.Colors.textFaint)
                         .tracking(0.8)
+                    PersonalPercentileChip(metric: "hrv_avg", value: engine.currentRMSSD)
                 }
                 HStack(alignment: .firstTextBaseline, spacing: 4) {
                     Image(systemName: positive ? "arrow.up.right" : "arrow.down.right")
@@ -894,6 +901,60 @@ private struct FoodStatCell: View {
         .frame(maxWidth: .infinity)
         .padding(.vertical, DS.Spacing.md)
         .glassDefault()
+    }
+}
+
+// MARK: - Personal Percentile Chip (v110 "vs your normal")
+// Live percentile of a value against his OWN rolling history. Self-contained async
+// fetch — renders nothing until it resolves, and nothing if there's no baseline.
+// Drop next to any metric. Internal (not private) so Health can reuse it.
+struct PersonalPercentileChip: View {
+    let metric: String
+    let value: Double
+    var windowDays: Int = 30
+
+    @State private var pct: Double?
+
+    var body: some View {
+        Group {
+            if let p = pct {
+                HStack(spacing: 3) {
+                    Image(systemName: "person.fill")
+                        .font(.system(size: 8, weight: .bold))
+                    Text("\(ordinal(Int(p.rounded()))) for you")
+                        .font(.system(size: 10, weight: .semibold, design: .rounded))
+                }
+                .foregroundStyle(tint(p))
+                .padding(.horizontal, 8)
+                .padding(.vertical, 4)
+                .background(Capsule().fill(tint(p).opacity(0.12)))
+                .overlay(Capsule().stroke(tint(p).opacity(0.25), lineWidth: 0.5))
+            }
+        }
+        .task {
+            if pct == nil, value > 0 {
+                pct = await SupabaseClient.shared.fetchPersonalPercentile(
+                    metric: metric, value: value, windowDays: windowDays)
+            }
+        }
+    }
+
+    private func tint(_ p: Double) -> Color {
+        if p >= 66 { return DS.Colors.teal }
+        if p >= 33 { return DS.Colors.amber }
+        return DS.Colors.textMuted
+    }
+
+    private func ordinal(_ n: Int) -> String {
+        let suffix: String
+        switch n % 100 {
+        case 11, 12, 13: suffix = "th"
+        default:
+            switch n % 10 {
+            case 1: suffix = "st"; case 2: suffix = "nd"; case 3: suffix = "rd"; default: suffix = "th"
+            }
+        }
+        return "\(n)\(suffix)"
     }
 }
 
