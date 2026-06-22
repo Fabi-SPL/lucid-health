@@ -84,7 +84,7 @@ struct ModeBanner: View {
         }
         .padding(.horizontal, DS.Spacing.md)
         .padding(.vertical, 8)
-        .background(.ultraThinMaterial)
+        .background(DS.Colors.cardFill)
         .overlay(
             Rectangle()
                 .fill(DS.Colors.border)

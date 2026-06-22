@@ -55,7 +55,7 @@ struct FABMenuItem: View {
                     .padding(.vertical, DS.Spacing.sm)
                     .background(
                         Capsule()
-                            .fill(.ultraThinMaterial)
+                            .fill(DS.Colors.cardFillElevated)
                             .overlay(Capsule().stroke(DS.Colors.border, lineWidth: 0.5))
                     )
 
