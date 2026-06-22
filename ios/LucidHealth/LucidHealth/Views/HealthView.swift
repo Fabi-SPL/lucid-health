@@ -197,40 +197,36 @@ struct HealthView: View {
             }
             .padding(.horizontal, DS.Spacing.md)
 
-            VStack(alignment: .leading, spacing: DS.Spacing.md) {
-                // Recovery score — demoted to 32pt (Today's hero ring is the focal)
-                HStack(alignment: .firstTextBaseline, spacing: 4) {
-                    Text(engine.recoveryScore > 0 ? "\(Int(engine.recoveryScore))" : "—")
-                        .font(.system(size: 32, weight: .heavy, design: .rounded))
-                        .foregroundStyle(DS.Colors.recoveryColor(engine.recoveryScore))
-                        .monospacedDigit()
-                        .contentTransition(.numericText())
-                    Text("/ 100")
-                        .font(.system(size: 12, weight: .medium))
-                        .foregroundStyle(DS.Colors.textFaint)
-                        .padding(.bottom, 4)
-                    Spacer()
+            // Ring (focal) + contribution breakdown beside it — distinct format
+            // from the battery gauge above. The 4-factor bar shows what built the score.
+            HStack(alignment: .center, spacing: DS.Spacing.lg) {
+                ScoreRing(
+                    score: engine.recoveryScore,
+                    size: 88,
+                    lineWidth: 7,
+                    color: DS.Colors.recoveryColor(engine.recoveryScore),
+                    label: "RECOVERY"
+                )
+
+                VStack(alignment: .leading, spacing: DS.Spacing.sm) {
                     StatusChip(
                         text: engine.recoveryLabel.isEmpty ? "—" : engine.recoveryLabel,
                         style: engine.recoveryScore >= 67 ? .teal : (engine.recoveryScore >= 34 ? .amber : .danger)
                     )
-                }
 
-                // Breakdown segmented bar
-                RecoveryBreakdownBar(
-                    hrv: engine.recoveryHRVContribution,
-                    rhr: engine.recoveryRHRContribution,
-                    sleep: engine.recoverySleepContribution,
-                    rr: engine.recoveryRRContribution
-                )
+                    RecoveryBreakdownBar(
+                        hrv: engine.recoveryHRVContribution,
+                        rhr: engine.recoveryRHRContribution,
+                        sleep: engine.recoverySleepContribution,
+                        rr: engine.recoveryRRContribution
+                    )
 
-                // Component legend
-                HStack(spacing: DS.Spacing.md) {
-                    legendItem(color: DS.Colors.teal, label: "HRV", value: Int(engine.recoveryHRVContribution * 100))
-                    legendItem(color: DS.Colors.pink, label: "RHR", value: Int(engine.recoveryRHRContribution * 100))
-                    legendItem(color: DS.Colors.violet, label: "Sleep", value: Int(engine.recoverySleepContribution * 100))
-                    legendItem(color: DS.Colors.amber, label: "RR", value: Int(engine.recoveryRRContribution * 100))
-                    Spacer()
+                    HStack(spacing: DS.Spacing.sm) {
+                        legendItem(color: DS.Colors.teal, label: "HRV", value: Int(engine.recoveryHRVContribution * 100))
+                        legendItem(color: DS.Colors.pink, label: "RHR", value: Int(engine.recoveryRHRContribution * 100))
+                        legendItem(color: DS.Colors.violet, label: "Sleep", value: Int(engine.recoverySleepContribution * 100))
+                        legendItem(color: DS.Colors.amber, label: "RR", value: Int(engine.recoveryRRContribution * 100))
+                    }
                 }
             }
             .padding(DS.Spacing.lg)
