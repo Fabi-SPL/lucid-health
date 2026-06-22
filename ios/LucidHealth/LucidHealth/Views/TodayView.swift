@@ -32,7 +32,6 @@ struct TodayView: View {
     @State private var saveSuccessCount = 0
     @State private var saveErrorCount = 0
     @StateObject private var modeStore = AppModeStore()
-    @State private var showTimeline = false
     @State private var activityDraft: String = ""
     @State private var showWindDown = false
 
@@ -149,41 +148,8 @@ struct TodayView: View {
                 )
             }
             ToolbarItem(placement: .navigationBarTrailing) {
-                HStack(spacing: 4) {
-                    Button {
-                        let h = UIImpactFeedbackGenerator(style: .light)
-                        h.impactOccurred()
-                        showTimeline = true
-                    } label: {
-                        Image(systemName: "clock.arrow.circlepath")
-                            .font(.system(size: 17, weight: .semibold))
-                            .foregroundStyle(DS.Colors.teal)
-                            .frame(width: 36, height: 36)
-                    }
-                    .buttonStyle(.plain)
-                    SettingsGearButton()
-                }
+                SettingsGearButton()
             }
-        }
-        .sheet(isPresented: $showTimeline) {
-            NavigationStack {
-                ActivityView(ble: bleManager)
-                    .navigationBarTitleDisplayMode(.inline)
-                    .toolbar {
-                        ToolbarItem(placement: .principal) {
-                            TwoToneHeadline(
-                                primary: "Timeline",
-                                secondary: " · Today",
-                                font: .system(size: 17, weight: .heavy, design: .rounded)
-                            )
-                        }
-                        ToolbarItem(placement: .navigationBarTrailing) {
-                            Button("Done") { showTimeline = false }
-                                .foregroundStyle(DS.Colors.violet)
-                        }
-                    }
-            }
-            .presentationDetents([.large])
         }
         .sheet(isPresented: $bleManager.showDoubleTapSheet) {
             QuickTagSheet(ble: bleManager)
