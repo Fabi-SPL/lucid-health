@@ -438,22 +438,23 @@ struct TodayView: View {
                         .scrollSectionTransition()
                 }
 
-                // Outside context — weather (always) + PC (if bridge running)
-                WeatherContextTile()
-                    .padding(.horizontal, DS.Spacing.md)
-                    .padding(.top, DS.Spacing.lg)
-                    .opacity(appeared ? 1 : 0)
-                    .offset(y: appeared ? 0 : 20)
-                    .animation(DS.Anim.stagger(index: 9), value: appeared)
-                    .scrollSectionTransition()
-
-                PCActivityTile()
-                    .padding(.horizontal, DS.Spacing.md)
-                    .padding(.top, DS.Spacing.md)
-                    .opacity(appeared ? 1 : 0)
-                    .offset(y: appeared ? 0 : 20)
-                    .animation(DS.Anim.stagger(index: 10), value: appeared)
-                    .scrollSectionTransition()
+                // Outside context — weather + PC, grouped under a collapsed
+                // "Context" disclosure so the home screen stays calm but the raw
+                // data is one tap away ("keep all, group ambient").
+                CollapsibleContext(title: "CONTEXT", icon: "globe.europe.africa.fill") {
+                    VStack(spacing: DS.Spacing.md) {
+                        WeatherContextTile()
+                            .padding(.horizontal, DS.Spacing.md)
+                        PCActivityTile()
+                            .padding(.horizontal, DS.Spacing.md)
+                    }
+                    .padding(.top, DS.Spacing.sm)
+                }
+                .padding(.top, DS.Spacing.lg)
+                .opacity(appeared ? 1 : 0)
+                .offset(y: appeared ? 0 : 20)
+                .animation(DS.Anim.stagger(index: 9), value: appeared)
+                .scrollSectionTransition()
 
                 Color.clear.frame(height: 100)
             }
@@ -955,6 +956,49 @@ struct PersonalPercentileChip: View {
             }
         }
         return "\(n)\(suffix)"
+    }
+}
+
+// MARK: - Collapsible Context (groups ambient tiles — weather, PC)
+// Header row + chevron; expanded state persists. Collapsed by default so Today's
+// top stays calm while keeping every raw data point one tap away.
+private struct CollapsibleContext<Content: View>: View {
+    let title: String
+    let icon: String
+    @ViewBuilder var content: () -> Content
+    @AppStorage("lucid_today_context_open") private var open: Bool = false
+
+    var body: some View {
+        VStack(spacing: 0) {
+            Button {
+                let h = UIImpactFeedbackGenerator(style: .light); h.impactOccurred()
+                withAnimation(DS.Anim.cardAppear) { open.toggle() }
+            } label: {
+                HStack(spacing: DS.Spacing.sm) {
+                    Image(systemName: icon)
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundStyle(DS.Colors.textMuted)
+                    Text(title)
+                        .font(DS.Font.label)
+                        .foregroundStyle(DS.Colors.textMuted)
+                        .tracking(0.8)
+                    Spacer()
+                    Image(systemName: "chevron.down")
+                        .font(.system(size: 11, weight: .bold))
+                        .foregroundStyle(DS.Colors.textFaint)
+                        .rotationEffect(.degrees(open ? 0 : -90))
+                }
+                .padding(.horizontal, DS.Spacing.md)
+                .padding(.vertical, DS.Spacing.sm)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+
+            if open {
+                content()
+                    .transition(.opacity.combined(with: .move(edge: .top)))
+            }
+        }
     }
 }
 
