@@ -303,6 +303,15 @@ struct TodayView: View {
                 // before going to bed. Hidden during day/morning/etc to avoid
                 // clutter — Settings has a copy for off-hours config.
                 if modeStore.current == .windDown {
+                    // v111 live readiness coach — how far the body is from sleep-ready,
+                    // server-computed from the last 10 min of stream vs his baselines.
+                    WindDownCoachCard(bleManager: bleManager)
+                        .padding(.horizontal, DS.Spacing.md)
+                        .padding(.top, DS.Spacing.md)
+                        .opacity(appeared ? 1 : 0)
+                        .animation(DS.Anim.cardAppear, value: appeared)
+                        .scrollSectionTransition()
+
                     SmartAlarmCard(bleManager: bleManager)
                         .padding(.horizontal, DS.Spacing.md)
                         .padding(.top, DS.Spacing.md)
@@ -1091,6 +1100,100 @@ private struct WakeCoachCard: View {
     private func handle() {
         handledDate = todayKey
         withAnimation(.easeOut(duration: 0.25)) { dismissed = true }
+    }
+}
+
+// MARK: - Wind-Down Coach (v111 Sleep Readiness Index)
+// Shown in wind-down mode above the smart alarm. Reads the last 10 min of strap
+// stream vs his personal sleep baselines (server-computed) and tells him how far
+// his body is from sleep-ready + roughly how long to wind down. Display-only.
+private struct WindDownCoachCard: View {
+    @ObservedObject var bleManager: BLEManager
+    @State private var sri: SleepReadiness?
+    @State private var loading = true
+
+    private var accent: Color {
+        guard let s = sri else { return DS.Colors.textMuted }
+        if s.ready { return DS.Colors.success }
+        return s.sri >= 40 ? DS.Colors.warning : DS.Colors.danger
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: DS.Spacing.md) {
+            HStack(spacing: 8) {
+                Image(systemName: "moon.stars.fill")
+                    .font(.system(size: 15, weight: .semibold))
+                    .foregroundStyle(accent)
+                    .symbolRenderingMode(.hierarchical)
+                Text("SLEEP READINESS")
+                    .font(.system(size: 10, weight: .bold))
+                    .foregroundStyle(DS.Colors.textFaint)
+                    .tracking(1.2)
+                Spacer()
+                if let s = sri {
+                    HStack(alignment: .firstTextBaseline, spacing: 2) {
+                        Text("\(s.sri)")
+                            .font(.system(size: 17, weight: .heavy, design: .rounded))
+                            .foregroundStyle(accent)
+                            .monospacedDigit()
+                        Text("/100")
+                            .font(.system(size: 10, weight: .medium))
+                            .foregroundStyle(DS.Colors.textFaint)
+                    }
+                }
+            }
+
+            if loading {
+                HStack(spacing: 8) {
+                    ProgressView().tint(DS.Colors.textMuted)
+                    Text("Reading your body\u{2026}")
+                        .font(.system(size: 13))
+                        .foregroundStyle(DS.Colors.textSecondary)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+            } else if let s = sri {
+                Text(s.message)
+                    .font(.system(size: 16, weight: .semibold, design: .rounded))
+                    .tracking(-0.2)
+                    .foregroundStyle(DS.Colors.textPrimary)
+                    .fixedSize(horizontal: false, vertical: true)
+
+                HStack(spacing: DS.Spacing.lg) {
+                    statCell(value: "\(Int(s.hrNow))", label: "HR now", color: DS.Colors.pink)
+                    statCell(value: "\(Int(s.hrFloor))", label: "your floor", color: DS.Colors.textSecondary)
+                    statCell(value: s.ready ? "ready" : "~\(s.etaMin)m",
+                             label: s.ready ? "now" : "to ready", color: accent)
+                }
+                .padding(.top, 2)
+            } else {
+                Text("No recent strap data \u{2014} put the band on to read your wind-down.")
+                    .font(.system(size: 13))
+                    .foregroundStyle(DS.Colors.textSecondary)
+            }
+        }
+        .padding(DS.Spacing.md)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .accentGlassCard(tint: accent)
+        .task { await load() }
+    }
+
+    private func statCell(value: String, label: String, color: Color) -> some View {
+        VStack(spacing: 2) {
+            Text(value)
+                .font(.system(size: 17, weight: .bold, design: .rounded))
+                .foregroundStyle(color)
+                .monospacedDigit()
+            Text(label)
+                .font(.system(size: 9, weight: .semibold))
+                .foregroundStyle(DS.Colors.textFaint)
+                .textCase(.uppercase)
+        }
+        .frame(maxWidth: .infinity)
+    }
+
+    private func load() async {
+        let r = await SupabaseClient.shared.fetchSleepReadiness()
+        await MainActor.run { self.sri = r; self.loading = false }
     }
 }
 
