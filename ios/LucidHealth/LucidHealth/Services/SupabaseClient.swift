@@ -71,6 +71,22 @@ struct IllnessRisk {
     var isSignal: Bool { level == "watch" || level == "elevated" }
 }
 
+/// Server `compute_sleep_readiness` (v111) — live Sleep Readiness Index from the
+/// last 10 min of strap stream vs personal baselines. The wind-down coach.
+/// Server-computed, read-only. sri is HR-gated 0-100.
+struct SleepReadiness {
+    let sri: Int
+    let hrNow: Double
+    let hrFloor: Double      // personal sleeping-HR floor
+    let hrGap: Double        // hrNow - floor
+    let rmssdNow: Double
+    let respNow: Double
+    let ready: Bool
+    let etaMin: Int          // minutes of wind-down still needed
+    let status: String       // "ready" | "getting there" | "wired" | "no data"
+    let message: String      // plain coaching line
+}
+
 class SupabaseClient {
 
     // Singleton — shared by app + BLEManager + Foods views
@@ -613,6 +629,78 @@ class SupabaseClient {
                                    sleptH: sleptH, debtH: debtH)
         } catch {
             log("plan_back_to_sleep error: \(error.localizedDescription)")
+            return nil
+        }
+    }
+
+    /// v111 wind-down coach. Live Sleep Readiness Index — how calm the body is vs
+    /// his personal sleep baselines, with a plain coaching message + ETA-to-ready.
+    /// Read-only server RPC. nil when no recent strap data (sri null row).
+    func fetchSleepReadiness() async -> SleepReadiness? {
+        do {
+            try await ensureAuth()
+            guard let token = accessToken else { return nil }
+            let body: [String: Any] = ["p_user_id": userId]
+            let url = URL(string: "\(baseURL)/rest/v1/rpc/compute_sleep_readiness")!
+            var req = URLRequest(url: url)
+            req.httpMethod = "POST"
+            req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+            req.setValue(anonKey, forHTTPHeaderField: "apikey")
+            req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+            req.httpBody = try JSONSerialization.data(withJSONObject: body)
+            let (data, resp) = try await session.data(for: req)
+            let code = (resp as? HTTPURLResponse)?.statusCode ?? 0
+            guard code < 300 else { log("compute_sleep_readiness HTTP \(code)"); return nil }
+            let obj: [String: Any]?
+            if let arr = try JSONSerialization.jsonObject(with: data) as? [[String: Any]] { obj = arr.first }
+            else { obj = try JSONSerialization.jsonObject(with: data) as? [String: Any] }
+            guard let p = obj, let sriNum = p["sri"] as? NSNumber else { return nil }
+            return SleepReadiness(
+                sri: sriNum.intValue,
+                hrNow: (p["hr_now"] as? NSNumber)?.doubleValue ?? 0,
+                hrFloor: (p["hr_floor"] as? NSNumber)?.doubleValue ?? 0,
+                hrGap: (p["hr_gap"] as? NSNumber)?.doubleValue ?? 0,
+                rmssdNow: (p["rmssd_now"] as? NSNumber)?.doubleValue ?? 0,
+                respNow: (p["resp_now"] as? NSNumber)?.doubleValue ?? 0,
+                ready: (p["ready"] as? Bool) ?? false,
+                etaMin: (p["eta_min"] as? NSNumber)?.intValue ?? 0,
+                status: (p["status"] as? String) ?? "",
+                message: (p["message"] as? String) ?? ""
+            )
+        } catch {
+            log("compute_sleep_readiness error: \(error.localizedDescription)")
+            return nil
+        }
+    }
+
+    /// v110 personalization. Live percentile (0-100) of a value vs his OWN rolling
+    /// history ("62nd pct for you"). Read-only RPC. nil if no usable baseline.
+    /// metric ∈ hrv_avg | resting_hr | sleep_hours | deep_sleep_min | rem_sleep_min
+    ///          | recovery_score | sleep_score
+    func fetchPersonalPercentile(metric: String, value: Double, windowDays: Int = 30) async -> Double? {
+        do {
+            try await ensureAuth()
+            guard let token = accessToken else { return nil }
+            let body: [String: Any] = [
+                "p_user_id": userId, "p_metric": metric,
+                "p_value": value, "p_window_days": windowDays
+            ]
+            let url = URL(string: "\(baseURL)/rest/v1/rpc/personal_percentile")!
+            var req = URLRequest(url: url)
+            req.httpMethod = "POST"
+            req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+            req.setValue(anonKey, forHTTPHeaderField: "apikey")
+            req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+            req.httpBody = try JSONSerialization.data(withJSONObject: body)
+            let (data, resp) = try await session.data(for: req)
+            let code = (resp as? HTTPURLResponse)?.statusCode ?? 0
+            guard code < 300 else { return nil }
+            let any = try JSONSerialization.jsonObject(with: data)
+            if let n = any as? NSNumber { return n.doubleValue }
+            if let arr = any as? [Any], let n = arr.first as? NSNumber { return n.doubleValue }
+            if let obj = any as? [String: Any], let n = obj["personal_percentile"] as? NSNumber { return n.doubleValue }
+            return nil
+        } catch {
             return nil
         }
     }
