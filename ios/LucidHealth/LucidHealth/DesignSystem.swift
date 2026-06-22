@@ -56,6 +56,20 @@ enum DS {
                 : UIColor(white: 1.0, alpha: 0.90)
         })
 
+        // Flat OPAQUE card surfaces — the redesign moved OFF translucent Liquid
+        // Glass (which bled the mesh through + smeared specular reflections) to
+        // solid cards. Opaque = no mesh bleed, no reflection. Whoop/Oura calm.
+        static let cardFill = Color(UIColor { tc in
+            tc.userInterfaceStyle == .dark
+                ? UIColor(red: 0.075, green: 0.075, blue: 0.114, alpha: 1)    // #13131d
+                : UIColor(red: 1.0, green: 1.0, blue: 1.0, alpha: 1)          // #ffffff
+        })
+        static let cardFillElevated = Color(UIColor { tc in
+            tc.userInterfaceStyle == .dark
+                ? UIColor(red: 0.106, green: 0.106, blue: 0.153, alpha: 1)    // #1b1b27
+                : UIColor(red: 0.99, green: 0.985, blue: 1.0, alpha: 1)       // #fcfbff
+        })
+
         // Text
         static let textPrimary = Color(UIColor { tc in
             tc.userInterfaceStyle == .dark
@@ -531,7 +545,14 @@ struct DotGridOverlay: View {
 struct GlassSubtle: ViewModifier {
     func body(content: Content) -> some View {
         content
-            .glassEffect(.regular, in: .rect(cornerRadius: DS.Radius.md))
+            .background(
+                RoundedRectangle(cornerRadius: DS.Radius.md, style: .continuous)
+                    .fill(DS.Colors.cardFill)
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: DS.Radius.md, style: .continuous)
+                    .stroke(DS.Colors.border, lineWidth: 0.5)
+            )
     }
 }
 
@@ -539,22 +560,14 @@ struct GlassSubtle: ViewModifier {
 struct GlassDefault: ViewModifier {
     func body(content: Content) -> some View {
         content
-            .glassEffect(
-                .regular.tint(DS.Colors.violet.opacity(0.04)).interactive(),
-                in: .rect(cornerRadius: DS.Radius.lg)
-            )
-            .overlay(alignment: .top) {
-                // inner shimmer top edge (adaptive — violet-tinted in light mode)
+            .background(
                 RoundedRectangle(cornerRadius: DS.Radius.lg, style: .continuous)
-                    .fill(
-                        LinearGradient(
-                            colors: [DS.Colors.shimmer.opacity(0.08), .clear],
-                            startPoint: .top, endPoint: .init(x: 0.5, y: 0.15)
-                        )
-                    )
-                    .frame(height: 32)
-                    .allowsHitTesting(false)
-            }
+                    .fill(DS.Colors.cardFill)
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: DS.Radius.lg, style: .continuous)
+                    .stroke(DS.Colors.border, lineWidth: 0.5)
+            )
     }
 }
 
@@ -562,20 +575,15 @@ struct GlassDefault: ViewModifier {
 struct GlassHero: ViewModifier {
     func body(content: Content) -> some View {
         content
-            .glassEffect(
-                .regular.tint(DS.Colors.violet.opacity(0.08)),
-                in: .rect(cornerRadius: DS.Radius.xl)
+            .background(
+                RoundedRectangle(cornerRadius: DS.Radius.xl, style: .continuous)
+                    .fill(DS.Colors.cardFillElevated)
             )
             .overlay(
-                LinearGradient(
-                    colors: [DS.Colors.violet.opacity(0.06), DS.Colors.teal.opacity(0.03)],
-                    startPoint: .topLeading, endPoint: .bottomTrailing
-                )
-                .clipShape(RoundedRectangle(cornerRadius: DS.Radius.xl, style: .continuous))
-                .allowsHitTesting(false)
+                RoundedRectangle(cornerRadius: DS.Radius.xl, style: .continuous)
+                    .stroke(DS.Colors.border, lineWidth: 0.5)
             )
-            .overlay(SpecularShimmer())
-            .shadow(color: DS.Colors.violet.opacity(0.18), radius: 24, x: 0, y: 8)
+            .shadow(color: .black.opacity(0.22), radius: 12, x: 0, y: 4)
     }
 }
 
@@ -583,7 +591,8 @@ struct GlassHero: ViewModifier {
 struct GlassPill: ViewModifier {
     func body(content: Content) -> some View {
         content
-            .glassEffect(.regular, in: .capsule)
+            .background(Capsule().fill(DS.Colors.cardFillElevated))
+            .overlay(Capsule().stroke(DS.Colors.border, lineWidth: 0.5))
     }
 }
 
@@ -638,11 +647,7 @@ struct GlassCard: ViewModifier {
             .padding(padding)
             .background(
                 RoundedRectangle(cornerRadius: radius, style: .continuous)
-                    .fill(.ultraThinMaterial)
-            )
-            .background(
-                RoundedRectangle(cornerRadius: radius, style: .continuous)
-                    .fill(tint.opacity(tintOpacity))
+                    .fill(DS.Colors.cardFill)
             )
             .clipShape(RoundedRectangle(cornerRadius: radius, style: .continuous))
             .overlay(
@@ -665,16 +670,16 @@ struct AccentGlassCard: ViewModifier {
         content
             .background(
                 RoundedRectangle(cornerRadius: radius, style: .continuous)
-                    .fill(.ultraThinMaterial)
+                    .fill(DS.Colors.cardFill)
             )
             .background(
                 RoundedRectangle(cornerRadius: radius, style: .continuous)
-                    .fill(tint.opacity(active ? 0.08 : 0.035))
+                    .fill(tint.opacity(active ? 0.07 : 0.0))
             )
             .clipShape(RoundedRectangle(cornerRadius: radius, style: .continuous))
             .overlay(
                 RoundedRectangle(cornerRadius: radius, style: .continuous)
-                    .stroke(tint.opacity(active ? 0.28 : 0.12), lineWidth: 0.5)
+                    .stroke(tint.opacity(active ? 0.32 : 0.12), lineWidth: active ? 1.0 : 0.5)
             )
     }
 }
@@ -687,21 +692,14 @@ struct HeroCard: ViewModifier {
             .padding(DS.Spacing.md)
             .background(
                 RoundedRectangle(cornerRadius: DS.Radius.xl, style: .continuous)
-                    .fill(.ultraThinMaterial)
-            )
-            .background(
-                RoundedRectangle(cornerRadius: DS.Radius.xl, style: .continuous)
-                    .fill(LinearGradient(
-                        colors: [color.opacity(0.12), DS.Colors.teal.opacity(0.06)],
-                        startPoint: .topLeading, endPoint: .bottomTrailing
-                    ))
+                    .fill(DS.Colors.cardFillElevated)
             )
             .clipShape(RoundedRectangle(cornerRadius: DS.Radius.xl, style: .continuous))
-            .overlay(SpecularShimmer())
             .overlay(
                 RoundedRectangle(cornerRadius: DS.Radius.xl, style: .continuous)
-                    .stroke(color.opacity(0.15), lineWidth: 0.5)
+                    .stroke(DS.Colors.border, lineWidth: 0.5)
             )
+            .shadow(color: .black.opacity(0.22), radius: 12, x: 0, y: 4)
     }
 }
 
