@@ -70,6 +70,13 @@ class BLEManager: NSObject, ObservableObject {
     @Published var historyFlushResult: String = ""             // human-readable result line for the flush escape-hatch
     private var isManualBackfillMode: Bool = false
     private var manualBackfillExistingMinutes: Set<Int> = []
+    /// v137 — timestamp of the last AUTOMATIC history erase (stuck-cursor self-heal).
+    /// Cooldown-guards autoEraseStuckHistory() so a wedged strap can't trigger an
+    /// erase loop. Persisted so the cooldown survives app relaunch / overnight kills.
+    private var lastAutoHistoryErase: Date = {
+        let t = UserDefaults.standard.double(forKey: "lucid_last_auto_history_erase")
+        return t > 0 ? Date(timeIntervalSince1970: t) : .distantPast
+    }()
     private var manualBackfillWindowStart: Date = Date()
     private var manualBackfillWindowEnd: Date = Date()
 
@@ -1349,6 +1356,28 @@ class BLEManager: NSObject, ObservableObject {
         }
     }
 
+    /// v137 — automatic sibling of flushHistoryBuffer(). Fired by the stuck-cursor
+    /// detector in finishHistoryWithDedup (NOT the manual button). Sends ERASE 0x19
+    /// to wipe the wedged buffer, then kicks a clean 72h pull once the strap settles
+    /// so the read-cursor resets and the NEXT real gap drains correctly. No manual
+    /// flush UI state — this is silent self-healing. Cooldown enforced by the caller.
+    private func autoEraseStuckHistory() {
+        bleQueue.async { [weak self] in
+            guard let self else { return }
+            guard let p = self.peripheral, let c = self.cmdToStrap, p.state == .connected else {
+                self.log("autoEraseStuckHistory: strap not connected — skipping erase")
+                return
+            }
+            p.writeValue(WhoopProtocol.eraseHistoryPacket(), for: c, type: .withResponse)
+            self.evt("history_erase_sent", "cmd=0x19 trigger=auto-stuck-cursor")
+            self.log("\u{26A0}\u{FE0F} ERASE_HISTORY (0x19) sent automatically — wiping wedged buffer")
+            self.bleQueue.asyncAfter(deadline: .now() + 5) { [weak self] in
+                guard let self else { return }
+                DispatchQueue.main.async { self.manualBackfill72h() }
+            }
+        }
+    }
+
     func manualBackfill72h() {
         guard !isManualBackfillMode else {
             log("manualBackfill72h: already in progress — ignoring")
@@ -1552,6 +1581,7 @@ class BLEManager: NSObject, ObservableObject {
             var skippedAlreadyCovered = 0
             var skippedOutOfRange = 0
             var skippedZeroHR = 0
+            var oorNewestTs = 0   // v137: newest out-of-range ts — if even this is ancient, the cursor is stuck
             // v104 diagnostic: capture the first N out-of-range timestamps so
             // we can see what the strap is actually returning. The May 21
             // manual-72h push returned 9 records, all out-of-range, with no
@@ -1564,6 +1594,7 @@ class BLEManager: NSObject, ObservableObject {
             for r in recordsFromStrap {
                 let ts = Int(r.timestamp)
                 guard ts >= minUnix && ts <= maxUnix && ts <= nowUnix + 60 else {
+                    if ts > 0 && ts < 4_102_444_800 && ts > oorNewestTs { oorNewestTs = ts }
                     if oorSamples.count < oorSampleCap {
                         // hr=NN ts=UNIX (ISO) — compact, parseable in bridge_logs
                         let isoStr: String = {
@@ -1611,6 +1642,42 @@ class BLEManager: NSObject, ObservableObject {
                     key: "history_sync_oor_samples",
                     value: "trigger=\(trigger) \(windowDesc) count=\(skippedOutOfRange) samples=[\(oorSamples.joined(separator: " | "))]"
                 )
+            }
+
+            // v137 — AUTO CURSOR-RESET (the permanent fix for the 4×-recurring
+            // phone-death gap). The strap can wedge its history read-cursor on a dead
+            // ancient buffer region (off-wrist HR ~6 from weeks ago) and replay it on
+            // every request → 100% out-of-range, 0 backfilled, forever. Manual ERASE
+            // was the only escape. Detect the unambiguous signature — a big storm of
+            // out-of-range records whose NEWEST sample is still >24h before the
+            // requested window (i.e. the strap is serving ancient data, not "no data")
+            // — and fire ERASE 0x19 automatically so the next sync drains clean.
+            // Auto-reconnect only + 6h cooldown so a wedged strap can never loop-erase.
+            if trigger == "auto-reconnect",
+               recordsFromStrap.count >= 100,
+               dedupedRecords.isEmpty,
+               skippedAlreadyCovered == 0,
+               skippedOutOfRange >= 100,
+               oorNewestTs > 0,
+               oorNewestTs < minUnix - 86_400 {
+                let sinceLastErase = Date().timeIntervalSince(self.lastAutoHistoryErase)
+                let staleDays = (minUnix - oorNewestTs) / 86_400
+                if sinceLastErase > 6 * 3600 {
+                    self.lastAutoHistoryErase = Date()
+                    UserDefaults.standard.set(self.lastAutoHistoryErase.timeIntervalSince1970, forKey: "lucid_last_auto_history_erase")
+                    let newestIso = ISO8601DateFormatter().string(from: Date(timeIntervalSince1970: TimeInterval(oorNewestTs)))
+                    self.supabase.pushDebugLog(
+                        key: "history_auto_erase_triggered",
+                        value: "trigger=auto-stuck-cursor total=\(recordsFromStrap.count) out_of_range=\(skippedOutOfRange) newest_served=\(oorNewestTs) newest_iso=\(newestIso) window_start=\(minUnix) stale_days=\(staleDays)"
+                    )
+                    self.log("\u{1F500} Stuck history cursor detected (newest served \(newestIso), \(staleDays)d stale) — auto-firing ERASE 0x19")
+                    self.autoEraseStuckHistory()
+                } else {
+                    self.supabase.pushDebugLog(
+                        key: "history_auto_erase_skipped_cooldown",
+                        value: "trigger=auto-stuck-cursor stale_days=\(staleDays) mins_since_last_erase=\(Int(sinceLastErase / 60))"
+                    )
+                }
             }
 
             if self.isManualBackfillMode {
