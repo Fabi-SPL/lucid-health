@@ -78,6 +78,22 @@ struct InsightsView: View {
                             .opacity(appeared ? 1 : 0)
                             .animation(DS.Anim.stagger(index: 1), value: appeared)
 
+                        // Featured pattern hero + diverging impact bars (v6 mockup)
+                        if let top = patterns.max(by: { $0.confidenceValue < $1.confidenceValue }) {
+                            FeaturedPatternCard(pattern: top)
+                                .padding(.horizontal, DS.Spacing.md)
+                                .offset(y: appeared ? 0 : 20)
+                                .opacity(appeared ? 1 : 0)
+                                .animation(DS.Anim.stagger(index: 1), value: appeared)
+                        }
+                        if patterns.count >= 3 {
+                            PatternImpactBars(patterns: patterns)
+                                .padding(.horizontal, DS.Spacing.md)
+                                .offset(y: appeared ? 0 : 20)
+                                .opacity(appeared ? 1 : 0)
+                                .animation(DS.Anim.stagger(index: 2), value: appeared)
+                        }
+
                         // Pattern cards
                         ForEach(Array(filtered.enumerated()), id: \.element.id) { i, pattern in
                             InsightCard(pattern: pattern)
@@ -358,6 +374,108 @@ private struct ConfidenceFilterRow: View {
 }
 
 // MARK: - Pattern Stats Banner
+
+// MARK: - Featured Pattern Hero (accent card — v6 mockup)
+
+private struct FeaturedPatternCard: View {
+    let pattern: FoodPattern
+    private var accent: Color { pattern.effectPositive ? DS.Colors.teal : DS.Colors.danger }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 9) {
+            HStack(spacing: 7) {
+                Image(systemName: "star.fill")
+                    .font(.system(size: 10, weight: .bold))
+                    .foregroundStyle(DS.Colors.violet)
+                Text("Strongest pattern")
+                    .font(.system(size: 10, weight: .bold))
+                    .tracking(1.4)
+                    .textCase(.uppercase)
+                    .foregroundStyle(DS.Colors.textMuted)
+            }
+            Text(pattern.title)
+                .font(.system(size: 17, weight: .bold))
+                .foregroundStyle(DS.Colors.textPrimary)
+                .fixedSize(horizontal: false, vertical: true)
+            if let eff = pattern.effectDescription, !eff.isEmpty {
+                Text(eff)
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundStyle(accent)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            Text(pattern.subtitle)
+                .font(.system(size: 13, weight: .medium))
+                .foregroundStyle(DS.Colors.textSecondary)
+                .fixedSize(horizontal: false, vertical: true)
+            Text("\(Int((pattern.confidenceValue * 100).rounded()))% confidence")
+                .font(.system(size: 11, weight: .bold, design: .rounded))
+                .monospacedDigit()
+                .foregroundStyle(DS.Colors.violet)
+                .padding(.horizontal, 9)
+                .padding(.vertical, 4)
+                .background(Capsule().fill(DS.Colors.violet.opacity(0.12)))
+        }
+        .padding(16)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(RoundedRectangle(cornerRadius: 22, style: .continuous).fill(DS.Colors.violet.opacity(0.10)))
+        .overlay(RoundedRectangle(cornerRadius: 22, style: .continuous).stroke(DS.Colors.violet.opacity(0.28), lineWidth: 1))
+    }
+}
+
+// MARK: - Diverging Impact Bars (v6 mockup)
+
+private struct PatternImpactBars: View {
+    let patterns: [FoodPattern]
+    private var rows: [FoodPattern] { Array(patterns.prefix(6)) }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("What moves your body")
+                .font(.system(size: 10, weight: .bold))
+                .tracking(1.4)
+                .textCase(.uppercase)
+                .foregroundStyle(DS.Colors.textMuted)
+            VStack(spacing: 10) {
+                ForEach(rows) { DivergingRow(pattern: $0) }
+            }
+        }
+        .padding(15)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(RoundedRectangle(cornerRadius: 20, style: .continuous).fill(DS.Colors.cardFill))
+        .overlay(RoundedRectangle(cornerRadius: 20, style: .continuous).stroke(DS.Colors.border, lineWidth: 1))
+    }
+}
+
+private struct DivergingRow: View {
+    let pattern: FoodPattern
+    private var color: Color { pattern.effectPositive ? DS.Colors.teal : DS.Colors.danger }
+    private var frac: CGFloat { CGFloat(min(max(pattern.confidenceValue, 0.06), 1.0)) }
+
+    var body: some View {
+        HStack(spacing: 10) {
+            Text(pattern.title)
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundStyle(DS.Colors.textSecondary)
+                .lineLimit(1)
+                .frame(width: 100, alignment: .leading)
+            GeometryReader { geo in
+                let half = geo.size.width / 2
+                let barW = half * frac
+                ZStack(alignment: .center) {
+                    Rectangle()
+                        .fill(DS.Colors.track)
+                        .frame(width: 1.5)
+                    Capsule()
+                        .fill(color)
+                        .frame(width: barW, height: 13)
+                        .offset(x: pattern.effectPositive ? barW / 2 : -barW / 2)
+                }
+                .frame(maxHeight: .infinity)
+            }
+            .frame(height: 16)
+        }
+    }
+}
 
 private struct PatternStatsBanner: View {
     let patterns: [FoodPattern]
