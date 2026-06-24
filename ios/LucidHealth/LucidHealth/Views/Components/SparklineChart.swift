@@ -77,7 +77,7 @@ struct SparklineChart: View {
 
 #Preview {
     ZStack {
-        MeshGradientBackground()
+        AuroraBackground()
         VStack(spacing: 20) {
             SparklineChart(
                 values: [42, 45, 39, 52, 48, 51, 55],

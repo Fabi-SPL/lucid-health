@@ -21,7 +21,7 @@ struct CategoryDot: View {
 
 #Preview {
     ZStack {
-        MeshGradientBackground()
+        AuroraBackground()
         VStack(alignment: .leading, spacing: 12) {
             CategoryDot(category: .body)
             CategoryDot(category: .mind)

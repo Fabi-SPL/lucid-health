@@ -19,7 +19,7 @@ struct ReviewView: View {
 
     var body: some View {
         ZStack {
-            MeshGradientBackground()
+            AuroraBackground()
 
             ScrollView {
                 VStack(spacing: DS.Spacing.lg) {

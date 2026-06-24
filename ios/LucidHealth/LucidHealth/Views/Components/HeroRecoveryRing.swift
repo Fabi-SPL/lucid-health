@@ -426,7 +426,7 @@ enum RecoveryRingStyle: String, CaseIterable, Identifiable {
 
 #Preview("Classic vs Smoke") {
     ZStack {
-        MeshGradientBackground()
+        AuroraBackground()
         VStack(spacing: 36) {
             HStack(spacing: 28) {
                 HeroRecoveryRing(score: 95, size: 140, lineWidth: 14)

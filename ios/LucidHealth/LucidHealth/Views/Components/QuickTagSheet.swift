@@ -124,7 +124,7 @@ struct QuickTagSheet: View {
                 .background(.ultraThinMaterial)
             }
         }
-        .background(MeshGradientBackground().ignoresSafeArea())
+        .background(AuroraBackground().ignoresSafeArea())
         .presentationDetents([.medium, .large])
         .presentationDragIndicator(.hidden)
         .overlay(alignment: .top) {
@@ -431,7 +431,7 @@ private struct BPLogSheet: View {
             .disabled(!canSave || saving)
             .padding(DS.Spacing.md)
         }
-        .background(MeshGradientBackground().ignoresSafeArea())
+        .background(AuroraBackground().ignoresSafeArea())
         .presentationDetents([.medium, .large])
         .onAppear { focus = .sys }
     }

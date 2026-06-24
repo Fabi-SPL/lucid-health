@@ -28,7 +28,7 @@ struct SettingsGearButton: View {
 
 #Preview {
     ZStack {
-        MeshGradientBackground()
+        AuroraBackground()
         HStack {
             Spacer()
             SettingsGearButton()

@@ -12,7 +12,7 @@ struct RootTabView: View {
     var body: some View {
         ZStack(alignment: .bottom) {
             // Single mesh background — shared across all tabs (no reflow)
-            MeshGradientBackground()
+            AuroraBackground()
                 .ignoresSafeArea()
 
             // Tab content — opacity/zIndex swap, no NavigationStack rerender

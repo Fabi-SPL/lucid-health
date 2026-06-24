@@ -54,7 +54,7 @@ struct AmbientLiveDot: View {
 
 #Preview {
     ZStack {
-        MeshGradientBackground()
+        AuroraBackground()
         VStack(spacing: 20) {
             HStack(spacing: 10) {
                 AmbientLiveDot(state: .connected)

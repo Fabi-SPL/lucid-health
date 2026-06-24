@@ -46,7 +46,7 @@ struct StatusChip: View {
 
 #Preview {
     ZStack {
-        MeshGradientBackground()
+        AuroraBackground()
         VStack(spacing: 12) {
             StatusChip(text: "*CONCEPT", style: .violet)
             StatusChip(text: "n=12/14", style: .teal, icon: "chart.line.uptrend.xyaxis")

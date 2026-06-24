@@ -69,7 +69,7 @@ struct LogViewerView: View {
                     }
                 }
             }
-            .background(MeshGradientBackground().ignoresSafeArea())
+            .background(AuroraBackground().ignoresSafeArea())
             .navigationTitle("Logs")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
