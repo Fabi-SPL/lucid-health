@@ -90,7 +90,7 @@ struct PillTabBar: View {
 
 #Preview {
     ZStack(alignment: .bottom) {
-        MeshGradientBackground()
+        AuroraBackground()
         PillTabBar(selectedTab: .constant(.today))
     }
 }

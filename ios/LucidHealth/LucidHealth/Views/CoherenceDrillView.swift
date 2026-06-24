@@ -51,7 +51,7 @@ struct CoherenceDrillView: View {
 
     var body: some View {
         ZStack {
-            MeshGradientBackground().ignoresSafeArea()
+            AuroraBackground().ignoresSafeArea()
 
             ScrollView(showsIndicators: false) {
                 VStack(spacing: DS.Spacing.lg) {

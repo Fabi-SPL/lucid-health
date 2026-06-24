@@ -80,7 +80,7 @@ struct BarcodeScannerSheet: View {
     var body: some View {
         NavigationStack {
             ZStack {
-                MeshGradientBackground()
+                AuroraBackground()
 
                 if let product {
                     BarcodeResultView(product: product) { entry in

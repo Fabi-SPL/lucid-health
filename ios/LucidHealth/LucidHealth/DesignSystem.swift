@@ -37,8 +37,8 @@ enum DS {
         // Backgrounds
         static let bg = Color(UIColor { tc in
             tc.userInterfaceStyle == .dark
-                ? UIColor(red: 0.031, green: 0.031, blue: 0.063, alpha: 1)    // #080810
-                : UIColor(red: 0.961, green: 0.941, blue: 1.0, alpha: 1)      // #f5f0ff
+                ? UIColor(red: 0.031, green: 0.027, blue: 0.051, alpha: 1)    // #08070d Aurora
+                : UIColor(red: 0.945, green: 0.941, blue: 0.965, alpha: 1)    // #f1f0f6 Aurora
         })
         static let surface = Color(UIColor { tc in
             tc.userInterfaceStyle == .dark
@@ -56,18 +56,24 @@ enum DS {
                 : UIColor(white: 1.0, alpha: 0.90)
         })
 
-        // Flat OPAQUE card surfaces — the redesign moved OFF translucent Liquid
-        // Glass (which bled the mesh through + smeared specular reflections) to
-        // solid cards. Opaque = no mesh bleed, no reflection. Whoop/Oura calm.
+        // AURORA card surfaces — translucent dark over the glow (lets the violet
+        // bleed through subtly) in dark, solid white in light. NO glass, NO blur,
+        // NO reflection. Depth = luminance + 1px border.
         static let cardFill = Color(UIColor { tc in
             tc.userInterfaceStyle == .dark
-                ? UIColor(red: 0.075, green: 0.075, blue: 0.114, alpha: 1)    // #13131d
-                : UIColor(red: 1.0, green: 1.0, blue: 1.0, alpha: 1)          // #ffffff
+                ? UIColor(red: 0.086, green: 0.078, blue: 0.133, alpha: 0.55) // ~#161422 @55%
+                : UIColor(red: 1.0, green: 1.0, blue: 1.0, alpha: 1.0)        // #ffffff
         })
         static let cardFillElevated = Color(UIColor { tc in
             tc.userInterfaceStyle == .dark
-                ? UIColor(red: 0.106, green: 0.106, blue: 0.153, alpha: 1)    // #1b1b27
-                : UIColor(red: 0.99, green: 0.985, blue: 1.0, alpha: 1)       // #fcfbff
+                ? UIColor(red: 0.106, green: 0.098, blue: 0.157, alpha: 0.72) // ~#1b1928 @72%
+                : UIColor(red: 1.0, green: 1.0, blue: 1.0, alpha: 1.0)        // #ffffff
+        })
+        /// Aurora glow — the ONE soft violet radial behind everything (top-center).
+        static let glow = Color(UIColor { tc in
+            tc.userInterfaceStyle == .dark
+                ? UIColor(red: 0.545, green: 0.486, blue: 0.965, alpha: 0.30) // violet @30%
+                : UIColor(red: 0.486, green: 0.361, blue: 0.749, alpha: 0.16) // violet @16%
         })
 
         // Text
@@ -372,8 +378,26 @@ extension Color {
     }
 }
 
-// MARK: - Mesh Gradient Background (iOS 18+ MeshGradient, animated)
+// MARK: - Aurora Background (the approved redesign canvas)
+// Solid bg + ONE soft violet radial glow, top-center. No mesh, no animation,
+// no reflections. Depth = glow + luminance + 1px borders. This replaces the
+// mesh as the app canvas; MeshGradientBackground stays defined but unused.
+struct AuroraBackground: View {
+    var body: some View {
+        ZStack {
+            DS.Colors.bg.ignoresSafeArea()
+            RadialGradient(
+                gradient: Gradient(colors: [DS.Colors.glow, DS.Colors.glow.opacity(0)]),
+                center: UnitPoint(x: 0.5, y: -0.05),
+                startRadius: 0,
+                endRadius: 520
+            )
+            .ignoresSafeArea()
+        }
+    }
+}
 
+// MARK: - Mesh Gradient Background (iOS 18+ MeshGradient, animated) — LEGACY, unused
 struct MeshGradientBackground: View {
     @Environment(\.colorScheme) var colorScheme
     @Environment(\.accessibilityReduceMotion) var reduceMotion

@@ -54,7 +54,7 @@ struct ActivityView: View {
             }
             .padding(.top, DS.Spacing.xs)
         }
-        .background(MeshGradientBackground().ignoresSafeArea())
+        .background(AuroraBackground().ignoresSafeArea())
         .task {
             await refresh()
             withAnimation(DS.Anim.cardAppear) { appeared = true }

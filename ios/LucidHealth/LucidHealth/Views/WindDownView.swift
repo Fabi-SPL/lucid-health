@@ -24,7 +24,7 @@ struct WindDownView: View {
 
     var body: some View {
         ZStack {
-            MeshGradientBackground().ignoresSafeArea()
+            AuroraBackground().ignoresSafeArea()
             // Vignette — dims the edges so the breathing glow + content hold the
             // centre. Depth, instead of competing violet-on-violet.
             RadialGradient(

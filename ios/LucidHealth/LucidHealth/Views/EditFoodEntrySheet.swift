@@ -123,7 +123,7 @@ struct EditFoodEntrySheet: View {
                     Color.clear.frame(height: DS.Spacing.lg)
                 }
             }
-            .background(MeshGradientBackground().ignoresSafeArea())
+            .background(AuroraBackground().ignoresSafeArea())
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .principal) {

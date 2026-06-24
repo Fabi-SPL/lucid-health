@@ -845,7 +845,7 @@ private struct FoodDetailView: View {
                 }
                 .padding(.horizontal, DS.Spacing.md)
             }
-            .background(MeshGradientBackground().ignoresSafeArea())
+            .background(AuroraBackground().ignoresSafeArea())
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .principal) {
@@ -1105,7 +1105,7 @@ private struct MealBuilderSheet: View {
                 }
                 .padding(.horizontal, DS.Spacing.md)
             }
-            .background(MeshGradientBackground().ignoresSafeArea())
+            .background(AuroraBackground().ignoresSafeArea())
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .principal) {
@@ -1489,7 +1489,7 @@ private struct QuickLogEditorSheet: View {
 
     var body: some View {
         ZStack {
-            MeshGradientBackground().ignoresSafeArea()
+            AuroraBackground().ignoresSafeArea()
             ScrollView(showsIndicators: false) {
                 VStack(spacing: DS.Spacing.lg) {
                     header

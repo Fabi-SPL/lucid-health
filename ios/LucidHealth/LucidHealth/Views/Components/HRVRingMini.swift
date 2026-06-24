@@ -58,7 +58,7 @@ struct HRVRingMini: View {
 
 #Preview {
     ZStack {
-        MeshGradientBackground()
+        AuroraBackground()
         HStack(spacing: 30) {
             VStack(spacing: 6) {
                 HRVRingMini(today: 52, baseline: 48)

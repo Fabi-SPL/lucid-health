@@ -79,7 +79,7 @@ struct RecoveryRingHero: View {
 
 #Preview {
     ZStack {
-        MeshGradientBackground()
+        AuroraBackground()
         VStack(spacing: 32) {
             RecoveryRingHero(score: 82, label: "Good")
             RecoveryRingHero(score: 47, label: "Okay", size: 120, lineWidth: 11)
