@@ -50,9 +50,9 @@ struct FoodView: View {
         return vals.reduce(0, +) / Double(vals.count)
     }
 
-    private var todayProtein: Double { entries.filter(isToday).compactMap(\.proteinG).reduce(0, +) }
-    private var todayCarbs: Double { entries.filter(isToday).compactMap(\.carbsG).reduce(0, +) }
-    private var todayFat: Double { entries.filter(isToday).compactMap(\.fatG).reduce(0, +) }
+    private var todayProtein: Double { entries.filter(isToday).flatMap(\.items).compactMap(\.proteinG).reduce(0, +) }
+    private var todayCarbs: Double { entries.filter(isToday).flatMap(\.items).compactMap(\.carbsG).reduce(0, +) }
+    private var todayFat: Double { entries.filter(isToday).flatMap(\.items).compactMap(\.fatG).reduce(0, +) }
 
     private var hoursSinceLastMeal: Int? {
         guard let last = entries.first(where: { Calendar.current.isDateInToday($0.capturedAt) }) else { return nil }
