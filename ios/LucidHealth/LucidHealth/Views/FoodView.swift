@@ -50,6 +50,10 @@ struct FoodView: View {
         return vals.reduce(0, +) / Double(vals.count)
     }
 
+    private var todayProtein: Double { entries.filter(isToday).compactMap(\.proteinG).reduce(0, +) }
+    private var todayCarbs: Double { entries.filter(isToday).compactMap(\.carbsG).reduce(0, +) }
+    private var todayFat: Double { entries.filter(isToday).compactMap(\.fatG).reduce(0, +) }
+
     private var hoursSinceLastMeal: Int? {
         guard let last = entries.first(where: { Calendar.current.isDateInToday($0.capturedAt) }) else { return nil }
         let hours = Int(Date().timeIntervalSince(last.capturedAt) / 3600)
@@ -75,6 +79,18 @@ struct FoodView: View {
                 //   • Fasting — lg (separate concern, more breathing)
                 //   • Filter — lg (control affordance, transitions into the list)
                 Section {
+                    FoodIntakeHero(
+                        kcal: todayKcal,
+                        protein: todayProtein,
+                        carbs: todayCarbs,
+                        fat: todayFat
+                    )
+                    .padding(.horizontal, DS.Spacing.md)
+                    .padding(.top, DS.Spacing.sm)
+                    .listRowInsets(EdgeInsets())
+                    .listRowBackground(Color.clear)
+                    .listRowSeparator(.hidden)
+
                     TodayBentoRow(
                         kcal: todayKcal,
                         mindAvg: todayMindAvg,
@@ -82,7 +98,7 @@ struct FoodView: View {
                         mealCount: todayEntries.count
                     )
                     .padding(.horizontal, DS.Spacing.md)
-                    .padding(.top, DS.Spacing.sm)
+                    .padding(.top, DS.Spacing.md)
                     .listRowInsets(EdgeInsets())
                     .listRowBackground(Color.clear)
                     .listRowSeparator(.hidden)
@@ -546,6 +562,116 @@ private struct TodayBentoRow: View {
                 unit: "meals",
                 color: DS.Colors.violet
             )
+        }
+    }
+}
+
+// MARK: - Food Intake Hero (Aurora macro donut + legend — matches v5 mockup)
+
+private struct FoodIntakeHero: View {
+    let kcal: Int
+    let protein: Double
+    let carbs: Double
+    let fat: Double
+
+    private var pCal: Double { protein * 4 }
+    private var cCal: Double { carbs * 4 }
+    private var fCal: Double { fat * 9 }
+    private var total: Double { max(pCal + cCal + fCal, 1) }
+    private var hasData: Bool { protein + carbs + fat > 0 }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("Intake & macros")
+                .font(.system(size: 10, weight: .bold))
+                .tracking(1.4)
+                .textCase(.uppercase)
+                .foregroundStyle(DS.Colors.textMuted)
+
+            HStack(spacing: 18) {
+                MacroDonut(
+                    kcal: kcal,
+                    pFrac: pCal / total,
+                    cFrac: cCal / total,
+                    fFrac: fCal / total,
+                    hasData: hasData
+                )
+                .frame(width: 122, height: 122)
+
+                VStack(alignment: .leading, spacing: 11) {
+                    MacroLegendRow(color: DS.Colors.violet, name: "Protein", grams: protein, pct: pCal / total, hasData: hasData)
+                    MacroLegendRow(color: DS.Colors.teal,   name: "Carbs",   grams: carbs,   pct: cCal / total, hasData: hasData)
+                    MacroLegendRow(color: DS.Colors.amber,  name: "Fat",     grams: fat,     pct: fCal / total, hasData: hasData)
+                }
+                Spacer(minLength: 0)
+            }
+        }
+        .padding(15)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(RoundedRectangle(cornerRadius: 20, style: .continuous).fill(DS.Colors.cardFill))
+        .overlay(RoundedRectangle(cornerRadius: 20, style: .continuous).stroke(DS.Colors.border, lineWidth: 1))
+    }
+}
+
+private struct MacroDonut: View {
+    let kcal: Int
+    let pFrac: Double
+    let cFrac: Double
+    let fFrac: Double
+    let hasData: Bool
+
+    var body: some View {
+        ZStack {
+            Circle().stroke(DS.Colors.track, lineWidth: 13)
+            if hasData {
+                arc(start: 0, len: pFrac, color: DS.Colors.violet)
+                arc(start: pFrac, len: cFrac, color: DS.Colors.teal)
+                arc(start: pFrac + cFrac, len: fFrac, color: DS.Colors.amber)
+            }
+            VStack(spacing: 1) {
+                Text(kcal > 0 ? "\(kcal)" : "—")
+                    .font(.system(size: 23, weight: .bold, design: .rounded))
+                    .monospacedDigit()
+                    .foregroundStyle(DS.Colors.textPrimary)
+                Text("kcal")
+                    .font(.system(size: 9, weight: .semibold))
+                    .tracking(0.6)
+                    .foregroundStyle(DS.Colors.textMuted)
+            }
+        }
+    }
+
+    private func arc(start: Double, len: Double, color: Color) -> some View {
+        Circle()
+            .trim(from: start, to: start + max(len, 0))
+            .stroke(color, style: StrokeStyle(lineWidth: 13, lineCap: .round))
+            .rotationEffect(.degrees(-90))
+    }
+}
+
+private struct MacroLegendRow: View {
+    let color: Color
+    let name: String
+    let grams: Double
+    let pct: Double
+    let hasData: Bool
+
+    var body: some View {
+        HStack(spacing: 8) {
+            Circle().fill(color).frame(width: 7, height: 7)
+            Text(name)
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundStyle(DS.Colors.textSecondary)
+            Spacer(minLength: 8)
+            Text(hasData ? "\(Int(grams.rounded()))g" : "—")
+                .font(.system(size: 13, weight: .bold, design: .rounded))
+                .monospacedDigit()
+                .foregroundStyle(DS.Colors.textPrimary)
+            Text(hasData ? "\(Int((pct * 100).rounded()))%" : "")
+                .font(.system(size: 11, weight: .semibold, design: .rounded))
+                .monospacedDigit()
+                .foregroundStyle(DS.Colors.textMuted)
+                .frame(width: 32, alignment: .trailing)
         }
     }
 }
