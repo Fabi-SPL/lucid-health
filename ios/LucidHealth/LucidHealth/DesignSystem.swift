@@ -75,6 +75,12 @@ enum DS {
                 ? UIColor(red: 0.545, green: 0.486, blue: 0.965, alpha: 0.30) // violet @30%
                 : UIColor(red: 0.486, green: 0.361, blue: 0.749, alpha: 0.16) // violet @16%
         })
+        /// Empty ring / bar track (Aurora) — what unfilled chart segments sit on.
+        static let track = Color(UIColor { tc in
+            tc.userInterfaceStyle == .dark
+                ? UIColor(white: 1.0, alpha: 0.10)
+                : UIColor(red: 0.902, green: 0.894, blue: 0.933, alpha: 1) // #e6e4ee
+        })
 
         // Text
         static let textPrimary = Color(UIColor { tc in
