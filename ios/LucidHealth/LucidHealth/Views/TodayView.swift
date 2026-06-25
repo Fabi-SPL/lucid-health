@@ -106,9 +106,9 @@ struct TodayView: View {
     // MARK: - Recovery context line (PINCH, pre-baked, no AI narration)
     private var recoveryContextLine: String {
         let s = engine.recoveryScore
-        if s >= 67 { return "Well recovered. Push what matters." }
-        if s >= 34 { return "Middle ground. Take it easier." }
-        return "Low. Let the tank refill." }
+        if s >= 67 { return "I'm charged today — push what matters." }
+        if s >= 34 { return "I'm running middle. Spend me, don't drain me." }
+        return "I'm low. Let me refill before you ask for much." }
 
     // MARK: - Time-of-day toolbar greeting
     private var timeOfDayGreeting: String {
@@ -286,6 +286,13 @@ struct TodayView: View {
                 greetingHeader
                     .opacity(appeared ? 1 : 0)
                     .offset(y: appeared ? 0 : 14)
+                    .animation(DS.Anim.cardAppear, value: appeared)
+
+                // AURA notices — first-person body voice, speaks ONLY when a signal
+                // is a genuine outlier vs his own 30-day normal. The luxury is silence.
+                AuraNoticeLine(recovery: engine.recoveryScore, rmssd: engine.currentRMSSD)
+                    .padding(.top, DS.Spacing.sm)
+                    .opacity(appeared ? 1 : 0)
                     .animation(DS.Anim.cardAppear, value: appeared)
 
                 ModeBanner(mode: modeStore.current, modeStore: modeStore)
@@ -905,6 +912,60 @@ private struct FoodStatCell: View {
 // Live percentile of a value against his OWN rolling history. Self-contained async
 // fetch — renders nothing until it resolves, and nothing if there's no baseline.
 // Drop next to any metric. Internal (not private) so Health can reuse it.
+// MARK: - AURA Notice (first-person outlier voice — speaks only when it's real)
+
+private struct AuraNoticeLine: View {
+    let recovery: Double
+    let rmssd: Double
+    @State private var line: String? = nil
+
+    var body: some View {
+        Group {
+            if let line {
+                HStack(alignment: .top, spacing: 8) {
+                    Circle()
+                        .fill(DS.Colors.violet)
+                        .frame(width: 6, height: 6)
+                        .padding(.top, 6)
+                    Text(line)
+                        .font(.system(size: 14.5, weight: .semibold, design: .rounded))
+                        .foregroundStyle(DS.Colors.textSecondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                    Spacer(minLength: 0)
+                }
+                .padding(.horizontal, DS.Spacing.md)
+                .transition(.opacity)
+            }
+        }
+        .task { await compute() }
+    }
+
+    private func compute() async {
+        let sb = SupabaseClient.shared
+        var candidates: [(metric: String, pct: Double)] = []
+        if recovery > 0, let p = await sb.fetchPersonalPercentile(metric: "recovery_score", value: recovery) {
+            candidates.append((metric: "recovery", pct: p))
+        }
+        if rmssd > 0, let p = await sb.fetchPersonalPercentile(metric: "hrv_avg", value: rmssd) {
+            candidates.append((metric: "hrv", pct: p))
+        }
+        // Most extreme signal vs the 50th percentile; speak only on a true outlier.
+        guard let top = candidates.max(by: { abs($0.pct - 50) < abs($1.pct - 50) }),
+              top.pct >= 88 || top.pct <= 12 else { return }
+        let high = top.pct >= 88
+        let phrase: String
+        switch (top.metric, high) {
+        case ("recovery", true):  phrase = "I'm in the top \(max(1, 100 - Int(top.pct)))% of my recoveries — this is a rare green light. Use it."
+        case ("recovery", false): phrase = "One of my lowest recoveries in a month. Go gentle with me today."
+        case ("hrv", true):       phrase = "My HRV is unusually high for me right now — I'm calm and deep. Good day to ask a lot."
+        case ("hrv", false):      phrase = "My HRV is bottom \(max(1, Int(top.pct)))% lately — something's taxing me. Worth noticing."
+        default:                  phrase = ""
+        }
+        guard !phrase.isEmpty else { return }
+        await MainActor.run { withAnimation { line = phrase } }
+    }
+}
+
 struct PersonalPercentileChip: View {
     let metric: String
     let value: Double
