@@ -248,14 +248,10 @@ struct TodayView: View {
 
     private var greetingHeader: some View {
         VStack(alignment: .leading, spacing: 3) {
-            (
-                Text(greetingPhrase + ", ")
-                    .foregroundStyle(DS.Colors.textPrimary)
-                + Text("Fabi")
-                    .foregroundStyle(DS.Colors.violet)
-            )
-            .font(.system(size: 30, weight: .heavy, design: .rounded))
-            .kerning(-0.6)
+            Text(greetingPhrase)
+                .foregroundStyle(DS.Colors.textPrimary)
+                .font(.system(size: 30, weight: .heavy, design: .rounded))
+                .kerning(-0.6)
 
             Text(greetingDateLine)
                 .font(.system(size: 11, weight: .bold, design: .rounded))
