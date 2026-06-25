@@ -17,6 +17,7 @@ struct InsightsView: View {
     @State private var biostateInitialCorrect: BiostateDetector? = nil
     @State private var lastNight: SleepRestlessness? = nil
     @State private var illness: IllnessRisk? = nil
+    @State private var dailyMetrics: [DailyMetric] = []
 
     private static let minimumEntries = 14
 
@@ -92,6 +93,22 @@ struct InsightsView: View {
                                 .offset(y: appeared ? 0 : 20)
                                 .opacity(appeared ? 1 : 0)
                                 .animation(DS.Anim.stagger(index: 2), value: appeared)
+                        }
+
+                        // Sleep↔recovery scatter + recovery heatmap (v6 mockup)
+                        if dailyMetrics.filter({ $0.recovery != nil && ($0.sleepHours ?? 0) > 0 }).count >= 4 {
+                            SleepRecoveryScatter(metrics: dailyMetrics)
+                                .padding(.horizontal, DS.Spacing.md)
+                                .offset(y: appeared ? 0 : 20)
+                                .opacity(appeared ? 1 : 0)
+                                .animation(DS.Anim.stagger(index: 3), value: appeared)
+                        }
+                        if dailyMetrics.contains(where: { $0.recovery != nil }) {
+                            RecoveryHeatmap(metrics: dailyMetrics)
+                                .padding(.horizontal, DS.Spacing.md)
+                                .offset(y: appeared ? 0 : 20)
+                                .opacity(appeared ? 1 : 0)
+                                .animation(DS.Anim.stagger(index: 4), value: appeared)
                         }
 
                         // Pattern cards
@@ -218,6 +235,7 @@ struct InsightsView: View {
         isLoading = true
         // Health-metric correlations don't need food data — fetch both, always compute.
         let metrics = await SupabaseClient.shared.fetchDailyMetrics(days: 120)
+        dailyMetrics = metrics
         var entries: [FoodEntry] = []
         do { entries = try await SupabaseClient.shared.fetchRecentFoodEntries(limit: 90) } catch { }
         entryCount = entries.count
@@ -374,6 +392,123 @@ private struct ConfidenceFilterRow: View {
 }
 
 // MARK: - Pattern Stats Banner
+
+// MARK: - Recovery Heatmap + Sleep↔Recovery Scatter (v6 mockup)
+
+private struct RecoveryHeatmap: View {
+    let metrics: [DailyMetric]
+
+    private var cells: [DailyMetric?] {
+        let sorted = metrics.sorted { $0.date < $1.date }
+        let last = Array(sorted.suffix(35))
+        let pad: [DailyMetric?] = Array(repeating: nil, count: max(0, 35 - last.count))
+        return pad + last.map { Optional($0) }
+    }
+
+    private func color(_ v: Double?) -> Color {
+        guard let v = v else { return DS.Colors.track }
+        if v >= 67 { return DS.Colors.success }
+        if v >= 34 { return DS.Colors.amber }
+        return DS.Colors.danger
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack {
+                Text("Recovery · 5 weeks")
+                    .font(.system(size: 10, weight: .bold)).tracking(1.4).textCase(.uppercase)
+                    .foregroundStyle(DS.Colors.textMuted)
+                Spacer()
+                HStack(spacing: 4) {
+                    Text("Low").font(.system(size: 9, weight: .semibold)).foregroundStyle(DS.Colors.textMuted)
+                    RoundedRectangle(cornerRadius: 2).fill(DS.Colors.danger).frame(width: 10, height: 10)
+                    RoundedRectangle(cornerRadius: 2).fill(DS.Colors.amber).frame(width: 10, height: 10)
+                    RoundedRectangle(cornerRadius: 2).fill(DS.Colors.success).frame(width: 10, height: 10)
+                    Text("High").font(.system(size: 9, weight: .semibold)).foregroundStyle(DS.Colors.textMuted)
+                }
+            }
+            LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 5), count: 7), spacing: 5) {
+                ForEach(0..<cells.count, id: \.self) { i in
+                    RoundedRectangle(cornerRadius: 4, style: .continuous)
+                        .fill(color(cells[i]?.recovery))
+                        .aspectRatio(1, contentMode: .fit)
+                }
+            }
+        }
+        .padding(15)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(RoundedRectangle(cornerRadius: 20, style: .continuous).fill(DS.Colors.cardFill))
+        .overlay(RoundedRectangle(cornerRadius: 20, style: .continuous).stroke(DS.Colors.border, lineWidth: 1))
+    }
+}
+
+private struct SleepRecoveryScatter: View {
+    let metrics: [DailyMetric]
+
+    private var points: [(x: Double, y: Double)] {
+        metrics.compactMap { m in
+            guard let s = m.sleepHours, let r = m.recovery, s > 0 else { return nil }
+            return (s, r)
+        }
+    }
+
+    private func recColor(_ v: Double) -> Color {
+        if v >= 67 { return DS.Colors.success }
+        if v >= 34 { return DS.Colors.amber }
+        return DS.Colors.danger
+    }
+
+    var body: some View {
+        let pts = points
+        let xs = pts.map { $0.x }
+        let ys = pts.map { $0.y }
+        let xMin = max((xs.min() ?? 4) - 0.3, 0)
+        let xMax = (xs.max() ?? 9) + 0.3
+        let xSpan = max(xMax - xMin, 1)
+        let n = Double(pts.count)
+        let sx = xs.reduce(0, +), sy = ys.reduce(0, +)
+        let sxx = xs.reduce(0) { $0 + $1 * $1 }
+        let sxy = zip(xs, ys).reduce(0) { $0 + $1.0 * $1.1 }
+        let denom = n * sxx - sx * sx
+        let slope = denom != 0 ? (n * sxy - sx * sy) / denom : 0
+        let intercept = n != 0 ? (sy - slope * sx) / n : 0
+
+        return VStack(alignment: .leading, spacing: 12) {
+            Text("Sleep vs recovery")
+                .font(.system(size: 10, weight: .bold)).tracking(1.4).textCase(.uppercase)
+                .foregroundStyle(DS.Colors.textMuted)
+            GeometryReader { geo in
+                let w = geo.size.width, h = geo.size.height
+                func px(_ x: Double) -> CGFloat { CGFloat((x - xMin) / xSpan) * w }
+                func py(_ y: Double) -> CGFloat { h - CGFloat(min(max(y, 0), 100) / 100) * h }
+                ZStack {
+                    Path { p in
+                        p.move(to: CGPoint(x: px(xMin), y: py(slope * xMin + intercept)))
+                        p.addLine(to: CGPoint(x: px(xMax), y: py(slope * xMax + intercept)))
+                    }
+                    .stroke(DS.Colors.violet.opacity(0.7), style: StrokeStyle(lineWidth: 2, dash: [4, 3]))
+                    ForEach(0..<pts.count, id: \.self) { i in
+                        Circle().fill(recColor(pts[i].y))
+                            .frame(width: 7, height: 7)
+                            .position(x: px(pts[i].x), y: py(pts[i].y))
+                    }
+                }
+            }
+            .frame(height: 128)
+            HStack {
+                Text("\(Int(xMin.rounded()))h").font(.system(size: 9, weight: .semibold)).foregroundStyle(DS.Colors.textMuted)
+                Spacer()
+                Text("sleep duration").font(.system(size: 9, weight: .medium)).foregroundStyle(DS.Colors.textMuted)
+                Spacer()
+                Text("\(Int(xMax.rounded()))h").font(.system(size: 9, weight: .semibold)).foregroundStyle(DS.Colors.textMuted)
+            }
+        }
+        .padding(15)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(RoundedRectangle(cornerRadius: 20, style: .continuous).fill(DS.Colors.cardFill))
+        .overlay(RoundedRectangle(cornerRadius: 20, style: .continuous).stroke(DS.Colors.border, lineWidth: 1))
+    }
+}
 
 // MARK: - Featured Pattern Hero (accent card — v6 mockup)
 
