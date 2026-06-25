@@ -11,8 +11,9 @@ struct RootTabView: View {
 
     var body: some View {
         ZStack(alignment: .bottom) {
-            // Single mesh background — shared across all tabs (no reflow)
-            AuroraBackground()
+            // Living Aurora — shared canvas across all tabs (no reflow). Breathes +
+            // reacts to recovery + drifts with circadian phase.
+            AuroraBackground(recovery: bleManager.healthEngine.recoveryScore)
                 .ignoresSafeArea()
 
             // Tab content — opacity/zIndex swap, no NavigationStack rerender
