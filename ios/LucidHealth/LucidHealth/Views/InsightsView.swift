@@ -479,8 +479,8 @@ private struct SleepRecoveryScatter: View {
                 .foregroundStyle(DS.Colors.textMuted)
             GeometryReader { geo in
                 let w = geo.size.width, h = geo.size.height
-                func px(_ x: Double) -> CGFloat { CGFloat((x - xMin) / xSpan) * w }
-                func py(_ y: Double) -> CGFloat { h - CGFloat(min(max(y, 0), 100) / 100) * h }
+                let px: (Double) -> CGFloat = { CGFloat(($0 - xMin) / xSpan) * w }
+                let py: (Double) -> CGFloat = { h - CGFloat(min(max($0, 0), 100) / 100) * h }
                 ZStack {
                     Path { p in
                         p.move(to: CGPoint(x: px(xMin), y: py(slope * xMin + intercept)))
