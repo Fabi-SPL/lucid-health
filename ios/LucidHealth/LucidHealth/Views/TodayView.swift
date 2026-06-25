@@ -372,6 +372,16 @@ struct TodayView: View {
                 }
                 .scrollSectionTransition()
 
+                // Tomorrow, foretold — AURA bets on tomorrow's recovery (server
+                // forecast) and grades yesterday's bet against today's actual.
+                TomorrowForetoldCard(actualRecoveryToday: engine.recoveryScore)
+                    .padding(.horizontal, DS.Spacing.md)
+                    .padding(.top, DS.Spacing.lg)
+                    .opacity(appeared ? 1 : 0)
+                    .offset(y: appeared ? 0 : 20)
+                    .animation(DS.Anim.stagger(index: 2), value: appeared)
+                    .scrollSectionTransition()
+
                 // Hermes — body-state interpreter + chat. Sits right under the
                 // recovery ring so the interpretation reads as commentary on
                 // the ring's number.
@@ -923,16 +933,114 @@ private struct FoodStatCell: View {
 // Live percentile of a value against his OWN rolling history. Self-contained async
 // fetch — renders nothing until it resolves, and nothing if there's no baseline.
 // Drop next to any metric. Internal (not private) so Health can reuse it.
+// MARK: - Tomorrow, Foretold (self-grading recovery oracle)
+
+private struct TomorrowForetoldCard: View {
+    let actualRecoveryToday: Double
+    @State private var tomorrow: ForecastDay? = nil
+    @State private var verdict: (text: String, hit: Bool)? = nil
+
+    private static let fmt: DateFormatter = {
+        let f = DateFormatter(); f.dateFormat = "yyyy-MM-dd"; return f
+    }()
+
+    var body: some View {
+        Group {
+            if tomorrow != nil || verdict != nil {
+                VStack(alignment: .leading, spacing: 11) {
+                    Text("Tomorrow, foretold")
+                        .font(.system(size: 10, weight: .bold)).tracking(1.4).textCase(.uppercase)
+                        .foregroundStyle(DS.Colors.textMuted)
+
+                    if let v = verdict {
+                        HStack(spacing: 7) {
+                            Image(systemName: v.hit ? "checkmark.seal.fill" : "xmark.seal.fill")
+                                .font(.system(size: 12, weight: .bold))
+                                .foregroundStyle(v.hit ? DS.Colors.success : DS.Colors.amber)
+                            Text(v.text)
+                                .font(.system(size: 13, weight: .semibold, design: .rounded))
+                                .foregroundStyle(DS.Colors.textSecondary)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                    }
+
+                    if let t = tomorrow, let p50 = t.recoveryP50 {
+                        Text("Tomorrow I'll likely run around \(Int(p50.rounded())) recovery.")
+                            .font(.system(size: 15, weight: .semibold, design: .rounded))
+                            .foregroundStyle(DS.Colors.textPrimary)
+                            .fixedSize(horizontal: false, vertical: true)
+                        ForecastRangeBar(p10: t.recoveryP10 ?? p50, p50: p50, p90: t.recoveryP90 ?? p50)
+                        Text("Could swing \(Int((t.recoveryP10 ?? p50).rounded()))–\(Int((t.recoveryP90 ?? p50).rounded())) depending on tonight.")
+                            .font(.system(size: 11.5, weight: .medium))
+                            .foregroundStyle(DS.Colors.textMuted)
+                    }
+                }
+                .padding(15)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(RoundedRectangle(cornerRadius: 20, style: .continuous).fill(DS.Colors.cardFill))
+                .overlay(RoundedRectangle(cornerRadius: 20, style: .continuous).stroke(DS.Colors.border, lineWidth: 1))
+            }
+        }
+        .task { await load() }
+    }
+
+    private func load() async {
+        let days = await SupabaseClient.shared.fetchForecast(days: 3)
+        let cal = Calendar.current
+        if let t = days.first(where: { Self.fmt.date(from: $0.targetDate).map { cal.isDateInTomorrow($0) } ?? false }),
+           let p50 = t.recoveryP50 {
+            UserDefaults.standard.set(p50, forKey: "aura_fc_\(t.targetDate)")
+            await MainActor.run { tomorrow = t }
+        }
+        // Grade the bet made yesterday FOR today.
+        let todayKey = "aura_fc_\(Self.fmt.string(from: Date()))"
+        if UserDefaults.standard.object(forKey: todayKey) != nil, actualRecoveryToday > 0 {
+            let predicted = UserDefaults.standard.double(forKey: todayKey)
+            let hit = abs(predicted - actualRecoveryToday) <= 8
+            let text = hit
+                ? "Called it — I bet \(Int(predicted)), you woke at \(Int(actualRecoveryToday))."
+                : "Off this time — I bet \(Int(predicted)), you came in at \(Int(actualRecoveryToday))."
+            await MainActor.run { verdict = (text, hit) }
+        }
+    }
+}
+
+private struct ForecastRangeBar: View {
+    let p10: Double
+    let p50: Double
+    let p90: Double
+
+    var body: some View {
+        GeometryReader { geo in
+            let w = geo.size.width
+            let lo = max(0.0, min(p10, p90)) / 100
+            let hi = min(1.0, max(p10, p90) / 100)
+            let mid = max(0.0, min(1.0, p50 / 100))
+            ZStack(alignment: .leading) {
+                Capsule().fill(DS.Colors.track).frame(height: 6)
+                Capsule()
+                    .fill(LinearGradient(colors: [DS.Colors.violet.opacity(0.55), DS.Colors.teal.opacity(0.55)], startPoint: .leading, endPoint: .trailing))
+                    .frame(width: max(4, w * (hi - lo)), height: 6)
+                    .offset(x: w * lo)
+                Circle().fill(DS.Colors.violet).frame(width: 11, height: 11)
+                    .offset(x: max(0, w * mid - 5.5))
+            }
+            .frame(maxHeight: .infinity)
+        }
+        .frame(height: 14)
+    }
+}
+
 // MARK: - Wake Bloom (last night painted as a generative aurora — morning ritual)
 
 private struct WakeBloomCard: View {
-    let stageMinutes: [SleepStage: Double]
+    let stageMinutes: [HealthEngine.SleepStage: Double]
     let durationHours: Double
     let sleepScore: Double
     @State private var revealed = false
 
     private var total: Double { max(stageMinutes.values.reduce(0, +), 1) }
-    private func frac(_ s: SleepStage) -> Double { (stageMinutes[s] ?? 0) / total }
+    private func frac(_ s: HealthEngine.SleepStage) -> Double { (stageMinutes[s] ?? 0) / total }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
