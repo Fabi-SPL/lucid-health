@@ -54,6 +54,31 @@ struct FoodView: View {
     private var todayCarbs: Double { entries.filter(isToday).flatMap(\.items).compactMap(\.carbsG).reduce(0, +) }
     private var todayFat: Double { entries.filter(isToday).flatMap(\.items).compactMap(\.fatG).reduce(0, +) }
 
+    private var todayMindTags: [String] {
+        let positive: Set<String> = ["leafy_green", "fish", "berries", "olive_oil", "nuts", "legumes", "whole_grain"]
+        var seen: [String] = []
+        for e in entries.filter(isToday) {
+            for it in e.items {
+                for t in it.mindTags where positive.contains(t) && !seen.contains(t) { seen.append(t) }
+            }
+        }
+        return seen
+    }
+
+    private var caffeineHits: [CaffeineHit] {
+        entries.filter(isToday).compactMap { e in
+            let cap = (e.caption ?? "").lowercased()
+            let tagged = e.items.contains { $0.mindTags.contains("caffeine") }
+            guard tagged || cap.contains("caffeine") else { return nil }
+            return CaffeineHit(date: e.capturedAt, mg: FoodView.parseCaffeineMg(cap) ?? 80)
+        }
+    }
+
+    private static func parseCaffeineMg(_ s: String) -> Double? {
+        guard let r = s.range(of: #"\d+(?=\s*mg)"#, options: .regularExpression) else { return nil }
+        return Double(String(s[r]))
+    }
+
     private var hoursSinceLastMeal: Int? {
         guard let last = entries.first(where: { Calendar.current.isDateInToday($0.capturedAt) }) else { return nil }
         let hours = Int(Date().timeIntervalSince(last.capturedAt) / 3600)
@@ -115,6 +140,24 @@ struct FoodView: View {
 
                     if !todayEntries.isEmpty {
                         FoodQualityRow(entries: todayEntries)
+                            .padding(.top, DS.Spacing.md)
+                            .listRowInsets(EdgeInsets())
+                            .listRowBackground(Color.clear)
+                            .listRowSeparator(.hidden)
+                    }
+
+                    if !todayEntries.isEmpty {
+                        MindMeterCard(score: todayMindAvg, tags: todayMindTags)
+                            .padding(.horizontal, DS.Spacing.md)
+                            .padding(.top, DS.Spacing.md)
+                            .listRowInsets(EdgeInsets())
+                            .listRowBackground(Color.clear)
+                            .listRowSeparator(.hidden)
+                    }
+
+                    if !caffeineHits.isEmpty {
+                        CaffeineCurveCard(hits: caffeineHits)
+                            .padding(.horizontal, DS.Spacing.md)
                             .padding(.top, DS.Spacing.md)
                             .listRowInsets(EdgeInsets())
                             .listRowBackground(Color.clear)
@@ -673,6 +716,132 @@ private struct MacroLegendRow: View {
                 .foregroundStyle(DS.Colors.textMuted)
                 .frame(width: 32, alignment: .trailing)
         }
+    }
+}
+
+// MARK: - Brain Food (MIND) meter + Caffeine decay curve (v5 mockup)
+
+struct CaffeineHit {
+    let date: Date
+    let mg: Double
+}
+
+private struct MindMeterCard: View {
+    let score: Double      // 0..15
+    let tags: [String]
+    private var filled: Int { max(0, min(15, Int(score.rounded()))) }
+
+    private func pretty(_ t: String) -> String {
+        t.replacingOccurrences(of: "_", with: " ")
+         .split(separator: " ").map { $0.prefix(1).uppercased() + $0.dropFirst() }.joined(separator: " ")
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack {
+                Text("Brain food")
+                    .font(.system(size: 10, weight: .bold)).tracking(1.4).textCase(.uppercase)
+                    .foregroundStyle(DS.Colors.textMuted)
+                Spacer()
+                Text("\(filled)/15")
+                    .font(.system(size: 14, weight: .bold, design: .rounded)).monospacedDigit()
+                    .foregroundStyle(DS.Colors.violet)
+            }
+            HStack(spacing: 4) {
+                ForEach(0..<15, id: \.self) { i in
+                    RoundedRectangle(cornerRadius: 2, style: .continuous)
+                        .fill(i < filled
+                              ? AnyShapeStyle(LinearGradient(colors: [DS.Colors.violet, DS.Colors.teal], startPoint: .top, endPoint: .bottom))
+                              : AnyShapeStyle(DS.Colors.track))
+                        .frame(maxWidth: .infinity)
+                        .frame(height: 26)
+                }
+            }
+            if !tags.isEmpty {
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 6) {
+                        ForEach(tags, id: \.self) { t in
+                            Text(pretty(t))
+                                .font(.system(size: 11, weight: .semibold))
+                                .foregroundStyle(DS.Colors.textSecondary)
+                                .padding(.horizontal, 10).padding(.vertical, 5)
+                                .background(Capsule().fill(DS.Colors.track))
+                        }
+                    }
+                }
+            }
+        }
+        .padding(15)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(RoundedRectangle(cornerRadius: 20, style: .continuous).fill(DS.Colors.cardFill))
+        .overlay(RoundedRectangle(cornerRadius: 20, style: .continuous).stroke(DS.Colors.border, lineWidth: 1))
+    }
+}
+
+private struct CaffeineCurveCard: View {
+    let hits: [CaffeineHit]
+    private let halfLife: Double = 5 * 3600   // ~5h plasma half-life
+
+    private func active(at t: Date) -> Double {
+        hits.reduce(0) { acc, h in
+            let dt = t.timeIntervalSince(h.date)
+            return dt >= 0 ? acc + h.mg * pow(0.5, dt / halfLife) : acc
+        }
+    }
+
+    var body: some View {
+        let now = Date()
+        let activeNow = active(at: now)
+        let earliest = hits.map(\.date).min() ?? now.addingTimeInterval(-6 * 3600)
+        let startD = min(earliest, now.addingTimeInterval(-3600)).addingTimeInterval(-1800)
+        let endD = now.addingTimeInterval(4 * 3600)
+        let start = startD.timeIntervalSinceReferenceDate
+        let span = max(endD.timeIntervalSinceReferenceDate - start, 1)
+        let maxY = max(hits.map(\.mg).reduce(0, +), activeNow, 1)
+
+        return VStack(alignment: .leading, spacing: 12) {
+            HStack {
+                Text("Caffeine")
+                    .font(.system(size: 10, weight: .bold)).tracking(1.4).textCase(.uppercase)
+                    .foregroundStyle(DS.Colors.textMuted)
+                Spacer()
+                Text("\(Int(activeNow.rounded())) mg active")
+                    .font(.system(size: 14, weight: .bold, design: .rounded)).monospacedDigit()
+                    .foregroundStyle(DS.Colors.amber)
+            }
+            GeometryReader { geo in
+                let w = geo.size.width, h = geo.size.height
+                let samples: [CGPoint] = stride(from: 0.0, through: 1.0, by: 1.0 / 44.0).map { f in
+                    let d = Date(timeIntervalSinceReferenceDate: start + f * span)
+                    return CGPoint(x: f * w, y: h - CGFloat(active(at: d) / maxY) * h)
+                }
+                let nowX = CGFloat((now.timeIntervalSinceReferenceDate - start) / span) * w
+                let nowY = h - CGFloat(activeNow / maxY) * h
+                ZStack {
+                    Path { p in
+                        p.move(to: CGPoint(x: 0, y: h))
+                        samples.forEach { p.addLine(to: $0) }
+                        p.addLine(to: CGPoint(x: w, y: h))
+                        p.closeSubpath()
+                    }
+                    .fill(LinearGradient(colors: [DS.Colors.amber.opacity(0.34), DS.Colors.amber.opacity(0.02)], startPoint: .top, endPoint: .bottom))
+                    Path { p in
+                        for (i, s) in samples.enumerated() { i == 0 ? p.move(to: s) : p.addLine(to: s) }
+                    }
+                    .stroke(DS.Colors.amber, style: StrokeStyle(lineWidth: 2, lineCap: .round, lineJoin: .round))
+                    Path { p in
+                        p.move(to: CGPoint(x: nowX, y: 0)); p.addLine(to: CGPoint(x: nowX, y: h))
+                    }
+                    .stroke(DS.Colors.textMuted, style: StrokeStyle(lineWidth: 1, dash: [3, 3]))
+                    Circle().fill(DS.Colors.amber).frame(width: 7, height: 7).position(x: nowX, y: nowY)
+                }
+            }
+            .frame(height: 88)
+        }
+        .padding(15)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(RoundedRectangle(cornerRadius: 20, style: .continuous).fill(DS.Colors.cardFill))
+        .overlay(RoundedRectangle(cornerRadius: 20, style: .continuous).stroke(DS.Colors.border, lineWidth: 1))
     }
 }
 
