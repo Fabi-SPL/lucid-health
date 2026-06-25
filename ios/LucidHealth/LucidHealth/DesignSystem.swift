@@ -384,12 +384,30 @@ extension Color {
     }
 }
 
-// MARK: - Aurora Background (the approved redesign canvas)
-// Solid bg + ONE soft violet radial glow, top-center. No mesh, no animation,
-// no reflections. Depth = glow + luminance + 1px borders. This replaces the
-// mesh as the app canvas; MeshGradientBackground stays defined but unused.
+// MARK: - Aurora Background (the LIVING canvas)
+// Solid bg + ONE soft violet glow. When given `recovery`, the glow becomes
+// ALIVE: it breathes (period paced by recovery), its intensity tracks how
+// recovered the body is (depleted = dim/cool, charged = luminous + teal life),
+// and it drifts lower/higher with the circadian phase of the day. nil recovery
+// = the calm static glow (sheets, previews). No mesh, no reflections.
 struct AuroraBackground: View {
+    /// 0–100. nil = static calm glow (transient sheets keep the still canvas).
+    var recovery: Double? = nil
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
     var body: some View {
+        if let rec = recovery, rec > 0, !reduceMotion {
+            TimelineView(.animation(minimumInterval: 1.0 / 20.0)) { ctx in
+                livingGlow(recovery: rec, date: ctx.date, breathing: true)
+            }
+        } else if let rec = recovery, rec > 0 {
+            livingGlow(recovery: rec, date: Date(), breathing: false)
+        } else {
+            staticGlow
+        }
+    }
+
+    private var staticGlow: some View {
         ZStack {
             DS.Colors.bg.ignoresSafeArea()
             RadialGradient(
@@ -397,6 +415,35 @@ struct AuroraBackground: View {
                 center: UnitPoint(x: 0.5, y: -0.05),
                 startRadius: 0,
                 endRadius: 520
+            )
+            .ignoresSafeArea()
+        }
+    }
+
+    private func livingGlow(recovery: Double, date: Date, breathing: Bool) -> some View {
+        let rec = max(0.0, min(1.0, recovery / 100.0))
+        let period = 7.0 - rec * 2.5                      // depleted breathes slow (~7s), charged fast (~4.5s)
+        let breath = breathing ? sin(date.timeIntervalSinceReferenceDate / period * 2 * .pi) : 0.0
+        let opacity = max(0.0, min(1.0, (0.5 + rec * 0.5) + breath * 0.09))
+        let radius: CGFloat = 500 + CGFloat(breath) * 30
+        let hour = Calendar.current.component(.hour, from: date)
+        let dayPhase = 0.5 - 0.5 * cos(Double((hour + 21) % 24) / 24.0 * 2 * .pi)  // 0 at ~3am, 1 at ~3pm
+        let yCenter = -0.10 + (1 - dayPhase) * 0.08      // sits lower at night
+        let tealMix = rec * (0.4 + dayPhase * 0.35)      // teal life only when charged + daytime
+        return ZStack {
+            DS.Colors.bg.ignoresSafeArea()
+            RadialGradient(
+                gradient: Gradient(colors: [DS.Colors.glow.opacity(opacity), DS.Colors.glow.opacity(0)]),
+                center: UnitPoint(x: 0.5, y: yCenter),
+                startRadius: 0,
+                endRadius: radius
+            )
+            .ignoresSafeArea()
+            RadialGradient(
+                gradient: Gradient(colors: [DS.Colors.teal.opacity(0.12 * tealMix), .clear]),
+                center: UnitPoint(x: 0.5, y: yCenter + 0.02),
+                startRadius: 0,
+                endRadius: radius * 0.82
             )
             .ignoresSafeArea()
         }
