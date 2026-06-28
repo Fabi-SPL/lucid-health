@@ -2091,7 +2091,8 @@ class SupabaseClient {
         items: [DetectedItem],
         totalKcal: Int,
         novaAvg: Double,
-        mindScore: Int?
+        mindScore: Int?,
+        capturedAt: Date? = nil
     ) async -> Bool {
         do {
             try await ensureAuth()
@@ -2118,6 +2119,9 @@ class SupabaseClient {
             ]
             if let caption = caption { body["caption"] = caption }
             if let mindScore = mindScore { body["mind_score"] = mindScore }
+            if let capturedAt = capturedAt {
+                body["captured_at"] = ISO8601DateFormatter().string(from: capturedAt)
+            }
 
             request.httpBody = try JSONSerialization.data(withJSONObject: body)
 

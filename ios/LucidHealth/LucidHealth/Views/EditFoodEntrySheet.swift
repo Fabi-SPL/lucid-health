@@ -11,6 +11,8 @@ struct EditFoodEntrySheet: View {
 
     @State private var caption: String
     @State private var items: [DetectedItem]
+    @State private var capturedAt: Date
+    @State private var caffeineMg: Int
     @State private var isSaving = false
     @State private var saved = false
     @State private var error: String?
@@ -19,8 +21,12 @@ struct EditFoodEntrySheet: View {
         self.original = entry
         self.onSaved = onSaved
         self.onCancel = onCancel
-        _caption = State(initialValue: entry.caption ?? "")
+        let rawCaption = entry.caption ?? ""
+        // Show the clean name in the field; caffeine lives in its own input.
+        _caption = State(initialValue: Self.stripCaffeineNote(rawCaption))
         _items = State(initialValue: entry.items)
+        _capturedAt = State(initialValue: entry.capturedAt)
+        _caffeineMg = State(initialValue: Self.parseCaffeineMg(rawCaption) ?? 0)
     }
 
     private var totalKcal: Int {
@@ -49,6 +55,47 @@ struct EditFoodEntrySheet: View {
                             .clipShape(RoundedRectangle(cornerRadius: DS.Radius.md, style: .continuous))
                             .foregroundStyle(DS.Colors.textPrimary)
                             .textInputAutocapitalization(.sentences)
+                    }
+                    .padding(DS.Spacing.md)
+                    .glassDefault()
+                    .padding(.horizontal, DS.Spacing.md)
+
+                    // When — editable timestamp (fixes the "can't change the
+                    // time I ate it" gap; backdate a meal you logged late)
+                    VStack(alignment: .leading, spacing: DS.Spacing.sm) {
+                        SectionHeader(icon: "clock", title: "WHEN", iconColor: DS.Colors.teal)
+                        DatePicker("", selection: $capturedAt, in: ...Date(), displayedComponents: [.date, .hourAndMinute])
+                            .datePickerStyle(.compact)
+                            .labelsHidden()
+                            .tint(DS.Colors.violet)
+                    }
+                    .padding(DS.Spacing.md)
+                    .glassDefault()
+                    .padding(.horizontal, DS.Spacing.md)
+
+                    // Caffeine — feeds the decay curve. Energy drinks / coffee
+                    // logged by barcode or photo carry no caffeine note, so the
+                    // curve can't see them; set the mg here and it shows up.
+                    VStack(alignment: .leading, spacing: DS.Spacing.sm) {
+                        SectionHeader(icon: "bolt.fill", title: "CAFFEINE", iconColor: DS.Colors.amber)
+                        HStack {
+                            TextField("0", value: $caffeineMg, format: .number)
+                                .keyboardType(.numberPad)
+                                .font(.system(size: 18, weight: .bold, design: .rounded))
+                                .foregroundStyle(DS.Colors.textPrimary)
+                                .monospacedDigit()
+                            Text("mg")
+                                .font(.system(size: 13, weight: .medium))
+                                .foregroundStyle(DS.Colors.textMuted)
+                            Spacer()
+                            Text("0 = none")
+                                .font(.system(size: 10))
+                                .foregroundStyle(DS.Colors.textFaint)
+                        }
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 10)
+                        .background(DS.Colors.surfaceElevated)
+                        .clipShape(RoundedRectangle(cornerRadius: DS.Radius.md, style: .continuous))
                     }
                     .padding(DS.Spacing.md)
                     .glassDefault()
@@ -184,16 +231,17 @@ struct EditFoodEntrySheet: View {
         }
         await MainActor.run { isSaving = true; error = nil }
 
-        let trimmedCaption = caption.trimmingCharacters(in: .whitespacesAndNewlines)
+        let finalCaption = Self.composeCaption(base: caption, caffeineMg: caffeineMg)
         let mindScore = recomputeMindScore(items: items)
 
         let ok = await SupabaseClient.shared.updateFoodEntry(
             id: id,
-            caption: trimmedCaption.isEmpty ? nil : trimmedCaption,
+            caption: finalCaption.isEmpty ? nil : finalCaption,
             items: items,
             totalKcal: totalKcal,
             novaAvg: novaAvg,
-            mindScore: mindScore
+            mindScore: mindScore,
+            capturedAt: capturedAt
         )
 
         await MainActor.run {
@@ -205,18 +253,20 @@ struct EditFoodEntrySheet: View {
                 let updated = FoodEntry(
                     id: original.id,
                     userId: original.userId,
-                    capturedAt: original.capturedAt,
+                    capturedAt: capturedAt,
                     photoUrl: original.photoUrl,
                     geminiRawJson: original.geminiRawJson,
                     items: items,
-                    caption: trimmedCaption.isEmpty ? nil : trimmedCaption,
+                    caption: finalCaption.isEmpty ? nil : finalCaption,
                     totalKcal: totalKcal,
                     novaAvg: novaAvg,
                     mindScore: mindScore,
                     confidence: original.confidence,
                     source: original.source,
                     createdAt: original.createdAt,
-                    logQuality: original.logQuality
+                    logQuality: original.logQuality,
+                    portionSize: original.portionSize,
+                    portionFactor: original.portionFactor
                 )
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) {
                     onSaved(updated)
@@ -238,6 +288,25 @@ struct EditFoodEntrySheet: View {
             }
         }
         return max(0, min(15, p - min(n, 2)))
+    }
+
+    // MARK: - Caffeine note helpers
+    static func parseCaffeineMg(_ s: String) -> Int? {
+        guard let r = s.range(of: #"\d+(?=\s*mg)"#, options: .regularExpression) else { return nil }
+        return Int(s[r])
+    }
+    /// Strip a trailing "· ~150mg caffeine" note so the name field stays clean.
+    static func stripCaffeineNote(_ s: String) -> String {
+        s.replacingOccurrences(of: #"\s*·?\s*~?\d+\s*mg\s*caffeine"#, with: "", options: [.regularExpression, .caseInsensitive])
+         .trimmingCharacters(in: .whitespaces)
+    }
+    /// Re-attach the caffeine note (same format quick-log uses) so the decay
+    /// curve's caption parser can read it. mg == 0 → no note.
+    static func composeCaption(base: String, caffeineMg: Int) -> String {
+        let b = base.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard caffeineMg > 0 else { return b }
+        let note = "~\(caffeineMg)mg caffeine"
+        return b.isEmpty ? note : "\(b) · \(note)"
     }
 }
 
