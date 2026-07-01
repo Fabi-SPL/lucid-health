@@ -156,7 +156,7 @@ class SupabaseClient {
 
             var flushed = 0
             while !queue.isEmpty {
-                let entry = queue.removeFirst()
+                var entry = queue.removeFirst()
                 guard let body = entry["body"] as? [String: Any],
                       let endpoint = entry["endpoint"] as? String else { continue }
 
@@ -174,7 +174,34 @@ class SupabaseClient {
 
                 let (_, response) = try await session.data(for: request)
                 let statusCode = (response as? HTTPURLResponse)?.statusCode ?? 0
-                if statusCode >= 300 { break } // stop on first failure
+
+                if statusCode == 401 || statusCode == 403 {
+                    // v141 — token rejected: put entry back, clear token so the next
+                    // flush re-auths. Never dead-letter on auth failure (loses good rows).
+                    queue.insert(entry, at: 0)
+                    accessToken = nil
+                    tokenExpiry = nil
+                    break
+                }
+                if statusCode >= 500 || statusCode == 0 {
+                    // Server/network transient — retry this entry later, bounded so a
+                    // permanently-5xx row can't wedge the queue head forever.
+                    let attempts = (entry["attempts"] as? Int ?? 0) + 1
+                    if attempts >= 6 {
+                        log("Evicting offline entry after \(attempts) failed attempts")
+                        continue
+                    }
+                    entry["attempts"] = attempts
+                    queue.insert(entry, at: 0)
+                    break
+                }
+                if statusCode >= 300 {
+                    // v141 — non-retryable 4xx (malformed / RLS / schema): dead-letter this
+                    // ONE entry and CONTINUE. Was `break`, so a single poison row blocked
+                    // every newer queued reading behind head-of-line blocking for up to ~8h.
+                    log("Dropping poison offline entry (HTTP \(statusCode))")
+                    continue
+                }
                 flushed += 1
             }
 
@@ -234,90 +261,125 @@ class SupabaseClient {
                      cognitiveCapacity: Double = 0, cognitiveLabel: String = "",
                      illnessRisk: Int = 0,
                      accelMagMg: Int = 0, movementScore: Double = 0) {
+        // v141 — build the FULL body up-front so BOTH the HTTP-failure branch and the
+        // network-error catch queue the identical complete row. Previously the catch
+        // queued a stripped 4-field stub (user_id/hr/hrv/source), silently dropping
+        // rr / respiratory / sleep_stage / skin_temp / all HI-v2 / movement on every
+        // network blip. NOTE: recorded_at is deliberately NOT sent — the v138 gap-check
+        // (fetchSyncCursor) depends on live rows stamping server now(); do not add it.
+        var body: [String: Any] = [
+            "user_id": userId,
+            "heart_rate": hr,
+            "rr_intervals": rr,
+            "hrv_rmssd": round(hrv * 10) / 10,
+            "battery_pct": round(battery * 10) / 10,
+            "source": "whoop_ble"
+        ]
+        if respiratoryRate > 0 {
+            body["respiratory_rate"] = round(respiratoryRate * 100) / 100
+        }
+        if !sleepStage.isEmpty {
+            body["sleep_stage"] = sleepStage.lowercased()
+        }
+        if !readiness.isEmpty && readiness != "—" {
+            body["readiness"] = readiness.lowercased()
+        }
+        if skinTemp > 0 {
+            body["skin_temp"] = round(skinTemp * 10) / 10
+        }
+        if spo2 > 0 {
+            body["blood_oxygen_pct"] = round(spo2 * 10) / 10
+        }
+        // Health Intelligence v2 metrics
+        if sdnn > 0 {
+            body["sdnn"] = round(sdnn * 10) / 10
+        }
+        if pnn50 > 0 {
+            body["pnn50"] = round(pnn50 * 10) / 10
+        }
+        if dfaAlpha1 > 0 {
+            body["dfa_alpha1"] = round(dfaAlpha1 * 100) / 100
+        }
+        if cognitiveCapacity > 0 {
+            body["cognitive_capacity"] = round(cognitiveCapacity)
+            body["cognitive_label"] = cognitiveLabel
+        }
+        if illnessRisk > 0 {
+            body["illness_risk"] = illnessRisk
+        }
+        // v98 — IMU-derived movement signal. Critical for wake-up detection:
+        // without this, only HR drives wake/sleep decisions and Fabi's
+        // chronic-low baseline overlaps awake-low-activity HR, causing
+        // missed wake events (May 8 incident).
+        if accelMagMg > 0 {
+            body["accel_mag_mg"] = accelMagMg
+        }
+        if movementScore > 0 {
+            body["movement_score"] = round(movementScore * 1000) / 1000
+        }
+
         Task {
-            do {
-                try await ensureAuth()
-
-                guard accessToken != nil else {
-                    log("Skip push — no auth token")
-                    return
+            // v141 — hold a background-task assertion so a push started inside a brief
+            // BLE wake window actually finishes instead of being cancelled when iOS
+            // re-suspends the app mid-request (URLSession.shared tasks die on suspend).
+            var bgTask: UIBackgroundTaskIdentifier = .invalid
+            bgTask = await MainActor.run {
+                UIApplication.shared.beginBackgroundTask(withName: "lucid-push-reading")
+            }
+            defer {
+                let t = bgTask
+                if t != .invalid {
+                    Task { @MainActor in UIApplication.shared.endBackgroundTask(t) }
                 }
+            }
 
+            func send() async throws -> Int {
                 let url = URL(string: "\(baseURL)/rest/v1/realtime_health")!
                 var request = URLRequest(url: url)
                 request.httpMethod = "POST"
                 request.setValue("application/json", forHTTPHeaderField: "Content-Type")
                 request.setValue(anonKey, forHTTPHeaderField: "apikey")
-                request.setValue("Bearer \(accessToken!)", forHTTPHeaderField: "Authorization")
-
-                var body: [String: Any] = [
-                    "user_id": userId,
-                    "heart_rate": hr,
-                    "rr_intervals": rr,
-                    "hrv_rmssd": round(hrv * 10) / 10,
-                    "battery_pct": round(battery * 10) / 10,
-                    "source": "whoop_ble"
-                ]
-                if respiratoryRate > 0 {
-                    body["respiratory_rate"] = round(respiratoryRate * 100) / 100
-                }
-                if !sleepStage.isEmpty {
-                    body["sleep_stage"] = sleepStage.lowercased()
-                }
-                if !readiness.isEmpty && readiness != "—" {
-                    body["readiness"] = readiness.lowercased()
-                }
-                if skinTemp > 0 {
-                    body["skin_temp"] = round(skinTemp * 10) / 10
-                }
-                if spo2 > 0 {
-                    body["blood_oxygen_pct"] = round(spo2 * 10) / 10
-                }
-                // Health Intelligence v2 metrics
-                if sdnn > 0 {
-                    body["sdnn"] = round(sdnn * 10) / 10
-                }
-                if pnn50 > 0 {
-                    body["pnn50"] = round(pnn50 * 10) / 10
-                }
-                if dfaAlpha1 > 0 {
-                    body["dfa_alpha1"] = round(dfaAlpha1 * 100) / 100
-                }
-                if cognitiveCapacity > 0 {
-                    body["cognitive_capacity"] = round(cognitiveCapacity)
-                    body["cognitive_label"] = cognitiveLabel
-                }
-                if illnessRisk > 0 {
-                    body["illness_risk"] = illnessRisk
-                }
-                // v98 — IMU-derived movement signal. Critical for wake-up detection:
-                // without this, only HR drives wake/sleep decisions and Fabi's
-                // chronic-low baseline overlaps awake-low-activity HR, causing
-                // missed wake events (May 8 incident).
-                if accelMagMg > 0 {
-                    body["accel_mag_mg"] = accelMagMg
-                }
-                if movementScore > 0 {
-                    body["movement_score"] = round(movementScore * 1000) / 1000
-                }
+                request.setValue("Bearer \(accessToken ?? "")", forHTTPHeaderField: "Authorization")
                 request.httpBody = try JSONSerialization.data(withJSONObject: body)
-
                 let (data, response) = try await session.data(for: request)
                 let statusCode = (response as? HTTPURLResponse)?.statusCode ?? 0
+                if statusCode >= 300 {
+                    let errBody = String(data: data, encoding: .utf8) ?? "?"
+                    log("PUSH FAILED HTTP \(statusCode): \(errBody.prefix(150))")
+                }
+                return statusCode
+            }
+
+            do {
+                try await ensureAuth()
+                guard accessToken != nil else {
+                    log("Skip push — no auth token")
+                    return
+                }
+
+                var statusCode = try await send()
+
+                // v141 — token rejected mid-session: force one refresh + retry before
+                // queuing, instead of 401-ing every push (queued-not-live) until the
+                // token naturally expires — up to ~1h of live-stream stall.
+                if statusCode == 401 || statusCode == 403 {
+                    log("Push \(statusCode) — refreshing auth, retrying once")
+                    accessToken = nil
+                    tokenExpiry = nil
+                    try await ensureAuth()
+                    if accessToken != nil { statusCode = try await send() }
+                }
 
                 if statusCode < 300 {
                     log("Pushed HR:\(hr) HRV:\(String(format: "%.1f", hrv))")
                     // Flush any queued writes while we have connectivity
                     await flushOfflineQueue()
                 } else {
-                    let errBody = String(data: data, encoding: .utf8) ?? "?"
-                    log("PUSH FAILED HTTP \(statusCode): \(errBody.prefix(150))")
                     queueOfflineWrite(body, endpoint: "realtime_health")
                 }
             } catch {
                 log("PUSH ERROR: \(error.localizedDescription)")
-                // Network error — queue for later
-                let body: [String: Any] = ["user_id": userId, "heart_rate": hr, "hrv_rmssd": round(hrv * 10) / 10, "source": "whoop_ble"]
+                // Network error — queue the FULL body for later (was a 4-field stub)
                 queueOfflineWrite(body, endpoint: "realtime_health")
             }
         }
