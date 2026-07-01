@@ -223,6 +223,9 @@ class BLEManager: NSObject, ObservableObject {
         UserDefaults.standard.bool(forKey: Self.hfbBroadcastEnabledKey) ? 1.0 : 10.0
     }
     private var pendingReadings: [HRReading] = []
+    // v141 — gates the opportunistic drain on the BLE wake path. Only ever
+    // touched on bleQueue (append site + flush site), so no lock needed.
+    private var lastFlush: Date = .distantPast
     // v98 — latest IMU values cached for realtime_health pushes. Without this,
     // realtime_health.accel_mag_mg / movement_score were always NULL even with
     // IMU streaming enabled, breaking the wake-up detector's movement signal.
@@ -2020,8 +2023,20 @@ class BLEManager: NSObject, ObservableObject {
         supabase.pushDebugLog(key: "device_info", value: summary)
     }
 
+    /// Thin entry point. Funnels the snapshot-and-clear onto the serial bleQueue.
+    /// v141 — flush is now triggered from TWO places: the main-runloop pushTimer
+    /// AND opportunistically from the BLE wake path (didUpdateValueFor). Routing
+    /// both through bleQueue means they can't race on pendingReadings (lost
+    /// readings / double-send). This also fixes a pre-existing race: the old timer
+    /// flushed on the main thread while appends ran on bleQueue.
     private func flushReadings() {
+        bleQueue.async { [weak self] in self?.flushReadingsOnQueue() }
+    }
+
+    /// MUST be called on bleQueue. Snapshot pendingReadings, clear, and push.
+    private func flushReadingsOnQueue() {
         guard !pendingReadings.isEmpty else { return }
+        lastFlush = Date()
         let batch = pendingReadings
         pendingReadings.removeAll()
 
@@ -2339,7 +2354,8 @@ extension BLEManager: CBCentralManagerDelegate {
             self.pushTimer?.invalidate()
         }
         stopWatchdog()
-        flushReadings()
+        flushReadingsOnQueue()  // v141 — on bleQueue here; flush synchronously so the
+                                // final batch is pushed before iOS can kill the app
         saveLastSyncTimestamp()  // Save exact disconnect time so gap sync is precise
 
         // Persist today's daily summary on disconnect — if the strap never reconnects
@@ -4342,6 +4358,22 @@ extension BLEManager: CBPeripheralDelegate {
                 // skipped backfill. The timestamp is now saved only where it means
                 // "we are caught up": history-download completion + clean disconnect.
                 lastDataReceived = Date()  // Watchdog: mark data alive
+
+                // v141 — DRAIN ON THE WAKE WINDOW (the real gap fix).
+                // The main-runloop pushTimer is FROZEN while the app is suspended,
+                // so on a backgrounded phone (evening, pocket, screen off, media
+                // playing) it never fires — readings pile up in pendingReadings in
+                // RAM and are lost when iOS reclaims the app. That was ~7.7h/day of
+                // loss, peaking in active/evening hours. But CoreBluetooth still
+                // wakes us per notification (bluetooth-central bg mode), and this
+                // callback runs on bleQueue, which is alive during that wake. So we
+                // drain here, at the source rate cadence, independent of the timer
+                // AND independent of whether the audio keep-alive is still alive.
+                // This is the "app as periodic drain" model the BLE architecture
+                // research prescribed — stop depending on staying unsuspended.
+                if Date().timeIntervalSince(lastFlush) >= pushInterval {
+                    flushReadingsOnQueue()
+                }
 
                 // v70 — TYPE-40 RAW CAPTURE.
                 // On v1.1.41 firmware, type-40 packets are only 17 bytes (abbreviated HR).
