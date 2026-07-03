@@ -68,9 +68,48 @@ struct HermesChatMessage: Codable, Identifiable, Equatable {
     }
 }
 
+/// Typed Hermes failure — carries ONLY a kind/status, never a raw server body.
+/// Mapped to calm first-person copy in the views; raw JSON never reaches the UI.
+private enum HermesError: Error {
+    case notSignedIn
+    case offline
+    case timeout
+    case server(Int)
+    case unknown
+
+    var friendly: String {
+        switch self {
+        case .notSignedIn: return "Sign in to read your body state."
+        case .offline:     return "Can't reach your body data right now — check your connection."
+        case .timeout:     return "That took a moment too long. I'll try again shortly."
+        case .server:      return "I'm having trouble reading my signals right now. Back in a bit."
+        case .unknown:     return "Something's off reading my signals right now."
+        }
+    }
+}
+
 private enum HermesAPI {
     static func bearerToken(from supabase: SupabaseClient) -> String? {
         supabase.accessToken
+    }
+
+    /// Cheap DB read of the latest /now snapshot — NO recompute, NO /now call.
+    /// Used on card appear so the slow/broken /now path isn't hit on every mount.
+    /// hermes_now_snapshots is single-user (no user_id column) → no filter.
+    static func fetchCached(supabase: SupabaseClient) async -> HermesNowSnapshot? {
+        let urlStr = "\(supabase.baseURL)/rest/v1/hermes_now_snapshots?select=interpretation,computed_at&order=computed_at.desc&limit=1"
+        guard let u = URL(string: urlStr) else { return nil }
+        var req = URLRequest(url: u)
+        req.setValue(supabase.anonKey, forHTTPHeaderField: "apikey")
+        req.setValue("Bearer \(supabase.accessToken ?? supabase.anonKey)", forHTTPHeaderField: "Authorization")
+        req.timeoutInterval = 12
+        struct Row: Codable { let interpretation: String?; let computed_at: String? }
+        guard let (data, resp) = try? await URLSession.shared.data(for: req),
+              let http = resp as? HTTPURLResponse, http.statusCode < 300,
+              let rows = try? JSONDecoder().decode([Row].self, from: data),
+              let r = rows.first else { return nil }
+        return HermesNowSnapshot(interpretation: r.interpretation, computed_at: r.computed_at,
+                                 raw_signal: nil, percentiles: nil, context: nil)
     }
 
     /// Call POST /api/hermes/now with no body to refresh the latest snapshot.
@@ -78,14 +117,19 @@ private enum HermesAPI {
         var req = URLRequest(url: URL(string: "\(hermesBaseURL)/api/hermes/now")!)
         req.httpMethod = "GET"
         req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
-        req.timeoutInterval = 25
-        let (data, resp) = try await URLSession.shared.data(for: req)
-        guard let httpResp = resp as? HTTPURLResponse, httpResp.statusCode < 300 else {
-            let body = String(data: data, encoding: .utf8) ?? ""
-            throw NSError(domain: "Hermes", code: (resp as? HTTPURLResponse)?.statusCode ?? -1,
-                          userInfo: [NSLocalizedDescriptionKey: "Hermes /now failed: \(body.prefix(200))"])
+        req.timeoutInterval = 40
+        do {
+            let (data, resp) = try await URLSession.shared.data(for: req)
+            guard let http = resp as? HTTPURLResponse else { throw HermesError.unknown }
+            guard http.statusCode < 300 else { throw HermesError.server(http.statusCode) }
+            return try JSONDecoder().decode(HermesNowSnapshot.self, from: data)
+        } catch let e as HermesError {
+            throw e
+        } catch let e as URLError {
+            throw e.code == .timedOut ? HermesError.timeout : HermesError.offline
+        } catch {
+            throw HermesError.unknown
         }
-        return try JSONDecoder().decode(HermesNowSnapshot.self, from: data)
     }
 
     /// Fetch the latest /now snapshot from DB (no recompute) — for initial card load.
@@ -99,13 +143,18 @@ private enum HermesAPI {
         let historyPayload = history.suffix(12).map { ["role": $0.role, "content": $0.content] }
         let body: [String: Any] = ["message": message, "history": historyPayload]
         req.httpBody = try JSONSerialization.data(withJSONObject: body)
-        let (data, resp) = try await URLSession.shared.data(for: req)
-        guard let httpResp = resp as? HTTPURLResponse, httpResp.statusCode < 300 else {
-            let body = String(data: data, encoding: .utf8) ?? ""
-            throw NSError(domain: "Hermes", code: (resp as? HTTPURLResponse)?.statusCode ?? -1,
-                          userInfo: [NSLocalizedDescriptionKey: "Hermes /chat failed: \(body.prefix(200))"])
+        do {
+            let (data, resp) = try await URLSession.shared.data(for: req)
+            guard let http = resp as? HTTPURLResponse else { throw HermesError.unknown }
+            guard http.statusCode < 300 else { throw HermesError.server(http.statusCode) }
+            return try JSONDecoder().decode(HermesChatReply.self, from: data)
+        } catch let e as HermesError {
+            throw e
+        } catch let e as URLError {
+            throw e.code == .timedOut ? HermesError.timeout : HermesError.offline
+        } catch {
+            throw HermesError.unknown
         }
-        return try JSONDecoder().decode(HermesChatReply.self, from: data)
     }
 }
 
@@ -177,19 +226,22 @@ struct HermesCard: View {
                 .disabled(isLoading)
             }
 
-            // Interpretation
-            if let err = error {
-                Text(err)
-                    .font(.system(size: 13))
-                    .foregroundStyle(DS.Colors.pink)
-                    .lineLimit(2)
-            } else {
+            // Interpretation — always show the last good reading (or placeholder).
+            // A failure appends a soft amber note; it never replaces the body with
+            // a raw error, so one transient 500 can't wipe the card to a stub.
+            VStack(alignment: .leading, spacing: 6) {
                 Text(interpretation)
                     .font(.system(size: 14, weight: .regular, design: .rounded))
                     .foregroundStyle(DS.Colors.textPrimary)
                     .lineSpacing(2)
                     .lineLimit(4)
                     .opacity(snapshot == nil ? 0.45 : 1.0)
+                if let err = error {
+                    Text(err)
+                        .font(.system(size: 11.5, weight: .medium, design: .rounded))
+                        .foregroundStyle(DS.Colors.amber)
+                        .lineLimit(2)
+                }
             }
 
             // Ask Hermes button
@@ -214,7 +266,6 @@ struct HermesCard: View {
                     )
                 )
                 .clipShape(RoundedRectangle(cornerRadius: DS.Radius.md))
-                .shadow(color: DS.Colors.violet.opacity(0.28), radius: 8, y: 3)
             }
             .buttonStyle(.plain)
             .scaleEffect(showingChat ? 0.97 : 1.0)
@@ -228,7 +279,15 @@ struct HermesCard: View {
         .onAppear {
             appeared = true
             if snapshot == nil {
-                Task { await refresh() }
+                Task {
+                    // Cheap cached read first — don't fire the heavy /now recompute on
+                    // every mount. Manual refresh still hits /now.
+                    if let cached = await HermesAPI.fetchCached(supabase: bleManager.supabase) {
+                        await MainActor.run { snapshot = cached }
+                    } else {
+                        await refresh()
+                    }
+                }
             }
         }
         .sheet(isPresented: $showingChat) {
@@ -243,20 +302,21 @@ struct HermesCard: View {
 
     private func refresh() async {
         guard let token = HermesAPI.bearerToken(from: bleManager.supabase) else {
-            error = "Sign in to use Hermes"
+            await MainActor.run { error = HermesError.notSignedIn.friendly }
             return
         }
-        isLoading = true
-        error = nil
+        await MainActor.run { isLoading = true; error = nil }
         do {
             let result = try await HermesAPI.refreshNow(token: token)
             await MainActor.run {
                 snapshot = result
+                error = nil
                 isLoading = false
             }
         } catch let e {
+            let msg = (e as? HermesError)?.friendly ?? HermesError.unknown.friendly
             await MainActor.run {
-                error = (e as NSError).localizedDescription
+                self.error = msg   // non-destructive — last snapshot stays, shown as sub-note
                 isLoading = false
             }
         }
@@ -309,7 +369,7 @@ struct HermesChatSheet: View {
                             if let err = error {
                                 Text(err)
                                     .font(.system(size: 13))
-                                    .foregroundStyle(DS.Colors.pink)
+                                    .foregroundStyle(DS.Colors.amber)
                                     .frame(maxWidth: .infinity, alignment: .leading)
                                     .padding(.horizontal, DS.Spacing.md)
                             }
@@ -470,9 +530,10 @@ struct HermesChatSheet: View {
             }
             persist()
         } catch let e {
+            let msg = (e as? HermesError)?.friendly ?? HermesError.unknown.friendly
             await MainActor.run {
                 DS.Haptic.error()
-                error = (e as NSError).localizedDescription
+                error = msg
                 isSending = false
             }
         }
@@ -927,11 +988,11 @@ struct HermesStatsSheet: View {
         let anon = supabase.anonKey
 
         async let patternsTask = restGet(
-            url: "\(base)/rest/v1/hermes_pattern_matches?user_id=eq.\(userId)&select=*&order=computed_at.desc&limit=80",
+            url: "\(base)/rest/v1/hermes_pattern_matches?select=*&order=computed_at.desc&limit=80",
             auth: auth, anon: anon, type: [HermesPatternRow].self
         )
         async let nowTask = restGet(
-            url: "\(base)/rest/v1/hermes_now_snapshots?user_id=eq.\(userId)&select=computed_at,percentiles&order=computed_at.desc&limit=30",
+            url: "\(base)/rest/v1/hermes_now_snapshots?select=computed_at,percentiles&order=computed_at.desc&limit=30",
             auth: auth, anon: anon, type: [HermesNowRow].self
         )
         let thirtyDaysAgo = ISO8601DateFormatter().string(from: Date().addingTimeInterval(-30 * 86400))
