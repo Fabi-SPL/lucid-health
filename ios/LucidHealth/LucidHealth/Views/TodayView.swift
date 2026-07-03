@@ -332,7 +332,8 @@ struct TodayView: View {
                     WakeBloomCard(
                         stageMinutes: engine.stageMinutes,
                         durationHours: engine.sleepDurationHours,
-                        sleepScore: engine.sleepScore
+                        sleepScore: engine.sleepScore,
+                        sleepEfficiency: engine.sleepEfficiency
                     )
                     .padding(.horizontal, DS.Spacing.md)
                     .padding(.top, DS.Spacing.md)
@@ -1037,73 +1038,87 @@ private struct WakeBloomCard: View {
     let stageMinutes: [HealthEngine.SleepStage: Double]
     let durationHours: Double
     let sleepScore: Double
+    let sleepEfficiency: Double
     @State private var revealed = false
 
+    // Explicit chronology-ish order — NOT allCases ([.awake,.light,.deep,.rem]).
+    private let order: [HealthEngine.SleepStage] = [.deep, .rem, .light, .awake]
     private var total: Double { max(stageMinutes.values.reduce(0, +), 1) }
     private func frac(_ s: HealthEngine.SleepStage) -> Double { (stageMinutes[s] ?? 0) / total }
+    private func mins(_ s: HealthEngine.SleepStage) -> Int { Int((stageMinutes[s] ?? 0).rounded()) }
+    private func name(_ s: HealthEngine.SleepStage) -> String {
+        switch s { case .deep: return "Deep"; case .rem: return "REM"; case .light: return "Light"; case .awake: return "Awake" }
+    }
+
+    private var durationLabel: String {
+        let h = Int(durationHours)
+        let m = Int((durationHours - Double(h)) * 60)
+        let pct = sleepEfficiency > 0 ? Int(sleepEfficiency.rounded()) : Int(sleepScore.rounded())
+        let tag = sleepEfficiency > 0 ? "% eff" : ""
+        return "\(h)h \(m)m · \(pct)\(tag)"
+    }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
+        VStack(alignment: .leading, spacing: 12) {
             HStack {
                 Text("Last night")
                     .font(.system(size: 10, weight: .bold)).tracking(1.4).textCase(.uppercase)
                     .foregroundStyle(DS.Colors.textMuted)
                 Spacer()
-                Text(String(format: "%.1fh · %d", durationHours, Int(sleepScore.rounded())))
+                Text(durationLabel)
                     .font(.system(size: 12, weight: .bold, design: .rounded)).monospacedDigit()
                     .foregroundStyle(DS.Colors.textSecondary)
             }
-            Canvas { ctx, size in
-                let w = size.width, h = size.height
-                ctx.fill(
-                    Path(CGRect(x: 0, y: 0, width: w, height: h)),
-                    with: .linearGradient(
-                        Gradient(colors: [DS.Colors.violet.opacity(0.07), DS.Colors.teal.opacity(0.05)]),
-                        startPoint: CGPoint(x: 0, y: 0), endPoint: CGPoint(x: w, y: h))
-                )
-                // Deep sleep — soft violet pools
-                let deepN = max(0, Int((frac(.deep) * 6).rounded()))
-                for i in 0..<deepN {
-                    let cx = w * (0.15 + 0.7 * Double(i) / Double(max(deepN, 1)))
-                    let cy = h * (0.55 + 0.25 * sin(Double(i) * 1.7))
-                    let r = 16.0 + frac(.deep) * 46.0
-                    let rect = CGRect(x: cx - r, y: cy - r, width: r * 2, height: r * 2)
-                    ctx.fill(
-                        Circle().path(in: rect),
-                        with: .radialGradient(
-                            Gradient(colors: [DS.Colors.violet.opacity(0.5), .clear]),
-                            center: CGPoint(x: cx, y: cy), startRadius: 0, endRadius: r)
+
+            // Crisp proportional stage ribbon — solid stageColor fills on ONE baseline,
+            // defined edges. Aurora glow lives BEHIND the bar, never on the data marks.
+            GeometryReader { geo in
+                let w = geo.size.width
+                ZStack {
+                    RadialGradient(
+                        gradient: Gradient(colors: [DS.Colors.violet.opacity(0.14), .clear]),
+                        center: .center, startRadius: 0, endRadius: w * 0.6
                     )
-                }
-                // REM — teal filaments
-                let remN = max(0, Int((frac(.rem) * 14).rounded()))
-                for i in 0..<remN {
-                    var p = Path()
-                    let x = w * Double(i) / Double(max(remN, 1))
-                    p.move(to: CGPoint(x: x, y: h * 0.28))
-                    p.addQuadCurve(to: CGPoint(x: x + 22, y: h * 0.72), control: CGPoint(x: x + 34, y: h * 0.5))
-                    ctx.stroke(p, with: .color(DS.Colors.teal.opacity(0.45)), lineWidth: 1.2)
-                }
-                // Awake — bright amber fractures
-                let awakeN = max(0, Int((frac(.awake) * 10).rounded()))
-                for i in 0..<awakeN {
-                    var p = Path()
-                    let x = w * (0.1 + 0.8 * Double(i) / Double(max(awakeN, 1)))
-                    p.move(to: CGPoint(x: x, y: h * 0.16))
-                    p.addLine(to: CGPoint(x: x, y: h * 0.84))
-                    ctx.stroke(p, with: .color(DS.Colors.amber.opacity(0.55)), lineWidth: 1)
+                    HStack(spacing: 2) {
+                        ForEach(order, id: \.self) { stage in
+                            if frac(stage) > 0 {
+                                RoundedRectangle(cornerRadius: 3, style: .continuous)
+                                    .fill(DS.Colors.stageColor(stage))
+                                    .frame(width: max(3, w * frac(stage)))
+                                    .scaleEffect(x: revealed ? 1 : 0, anchor: .leading)
+                            }
+                        }
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
                 }
             }
-            .frame(height: 96)
-            .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
-            .opacity(revealed ? 1 : 0)
-            .scaleEffect(revealed ? 1 : 0.97)
-            .animation(.easeOut(duration: 1.3), value: revealed)
+            .frame(height: 40)
+            .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+            .overlay(RoundedRectangle(cornerRadius: 8, style: .continuous).stroke(DS.Colors.border, lineWidth: 0.5))
+            .animation(.easeOut(duration: 0.7), value: revealed)
+
+            // Legend — dot + stage + minutes, only for stages actually present.
+            HStack(spacing: 14) {
+                ForEach(order, id: \.self) { stage in
+                    if mins(stage) > 0 {
+                        HStack(spacing: 5) {
+                            Circle().fill(DS.Colors.stageColor(stage)).frame(width: 7, height: 7)
+                            Text(name(stage))
+                                .font(.system(size: 11, weight: .semibold, design: .rounded))
+                                .foregroundStyle(DS.Colors.textSecondary)
+                            Text("\(mins(stage))m")
+                                .font(.system(size: 11, weight: .medium, design: .rounded)).monospacedDigit()
+                                .foregroundStyle(DS.Colors.textMuted)
+                        }
+                    }
+                }
+                Spacer(minLength: 0)
+            }
         }
-        .padding(15)
+        .padding(DS.Spacing.lg)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(RoundedRectangle(cornerRadius: 20, style: .continuous).fill(DS.Colors.cardFill))
-        .overlay(RoundedRectangle(cornerRadius: 20, style: .continuous).stroke(DS.Colors.border, lineWidth: 1))
+        .overlay(RoundedRectangle(cornerRadius: 20, style: .continuous).stroke(DS.Colors.border, lineWidth: 0.5))
         .onAppear { revealed = true }
     }
 }
