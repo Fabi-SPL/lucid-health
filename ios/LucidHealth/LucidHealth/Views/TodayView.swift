@@ -288,26 +288,40 @@ struct TodayView: View {
                     .offset(y: appeared ? 0 : 14)
                     .animation(DS.Anim.cardAppear, value: appeared)
 
-                // AURA notices — first-person body voice, speaks ONLY when a signal
-                // is a genuine outlier vs his own 30-day normal. The luxury is silence.
-                AuraNoticeLine(recovery: engine.recoveryScore, rmssd: engine.currentRMSSD)
-                    .padding(.top, DS.Spacing.sm)
-                    .opacity(appeared ? 1 : 0)
-                    .animation(DS.Anim.cardAppear, value: appeared)
-
                 ModeBanner(mode: modeStore.current, modeStore: modeStore)
                     .padding(.top, DS.Spacing.sm)
                     .opacity(appeared ? 1 : 0)
                     .animation(DS.Anim.cardAppear, value: appeared)
                     .scrollSectionTransition()
 
-                // SMART ALARM — surfaced right under the mode banner during
-                // wind-down (22:00–00:00) so Fabi can configure tonight's wake
-                // before going to bed. Hidden during day/morning/etc to avoid
-                // clutter — Settings has a copy for off-hours config.
+                // Hero ring + live stats — THE focal point, first substantive block
+                // (matches the approved mockup: ring immediately under the greeting).
+                VStack(spacing: 0) {
+                    heroSection
+                        .padding(.top, DS.Spacing.lg)
+                        .opacity(appeared ? 1 : 0)
+                        .offset(y: appeared ? 0 : 28)
+                        .animation(DS.Anim.stagger(index: 0), value: appeared)
+
+                    liveStatsSection
+                        .padding(.top, DS.Spacing.sm)
+                        .opacity(appeared ? 1 : 0)
+                        .offset(y: appeared ? 0 : 20)
+                        .animation(DS.Anim.stagger(index: 1), value: appeared)
+                }
+                .scrollSectionTransition()
+
+                // Recovery tone banner — sits just under the ring it comments on.
+                RecoveryOverlayBanner(overlay: overlay)
+                    .padding(.top, DS.Spacing.sm)
+                    .opacity(appeared ? 1 : 0)
+                    .animation(DS.Anim.cardAppear, value: appeared)
+                    .scrollSectionTransition()
+
+                // ONE coach card, mode-conditional — the single interpretive surface,
+                // now BELOW the hero (it was burying the ring above it).
                 if modeStore.current == .windDown {
-                    // v111 live readiness coach — how far the body is from sleep-ready,
-                    // server-computed from the last 10 min of stream vs his baselines.
+                    // v111 live readiness coach — how far the body is from sleep-ready.
                     WindDownCoachCard(bleManager: bleManager)
                         .padding(.horizontal, DS.Spacing.md)
                         .padding(.top, DS.Spacing.md)
@@ -323,11 +337,7 @@ struct TodayView: View {
                         .scrollSectionTransition()
                 }
 
-                // GO BACK OR GET UP? — in-window wake coach. Surfaces when Fabi
-                // wakes early: either he tapped "I'm awake" (→ justWokeUp) or it's
-                // the 05–10 morning window before he's confirmed up. Asks the server
-                // for a personalized go-back / get-up call and (if go-back) arms a
-                // gentle wake at his next cycle boundary. Once per day.
+                // Morning: last-night ribbon + wake coach.
                 if modeStore.current == .justWokeUp || modeStore.current == .morning {
                     WakeBloomCard(
                         stageMinutes: engine.stageMinutes,
@@ -349,51 +359,6 @@ struct TodayView: View {
                         .scrollSectionTransition()
                 }
 
-                RecoveryOverlayBanner(overlay: overlay)
-                    .padding(.top, DS.Spacing.sm)
-                    .opacity(appeared ? 1 : 0)
-                    .animation(DS.Anim.cardAppear, value: appeared)
-                    .scrollSectionTransition()
-
-                // Hero + Live stats refract together as one material (LiquidGlassReference)
-                GlassEffectContainer(spacing: 32) {
-                    VStack(spacing: 0) {
-                        heroSection
-                            .padding(.top, DS.Spacing.xl)
-                            .opacity(appeared ? 1 : 0)
-                            .offset(y: appeared ? 0 : 28)
-                            .animation(DS.Anim.stagger(index: 0), value: appeared)
-
-                        liveStatsSection
-                            .padding(.top, DS.Spacing.sm)
-                            .opacity(appeared ? 1 : 0)
-                            .offset(y: appeared ? 0 : 20)
-                            .animation(DS.Anim.stagger(index: 1), value: appeared)
-                    }
-                }
-                .scrollSectionTransition()
-
-                // Tomorrow, foretold — AURA bets on tomorrow's recovery (server
-                // forecast) and grades yesterday's bet against today's actual.
-                TomorrowForetoldCard(actualRecoveryToday: engine.recoveryScore)
-                    .padding(.horizontal, DS.Spacing.md)
-                    .padding(.top, DS.Spacing.lg)
-                    .opacity(appeared ? 1 : 0)
-                    .offset(y: appeared ? 0 : 20)
-                    .animation(DS.Anim.stagger(index: 2), value: appeared)
-                    .scrollSectionTransition()
-
-                // Hermes — body-state interpreter + chat. Sits right under the
-                // recovery ring so the interpretation reads as commentary on
-                // the ring's number.
-                HermesCard()
-                    .padding(.horizontal, DS.Spacing.md)
-                    .padding(.top, DS.Spacing.lg)
-                    .opacity(appeared ? 1 : 0)
-                    .offset(y: appeared ? 0 : 20)
-                    .animation(DS.Anim.stagger(index: 2), value: appeared)
-                    .scrollSectionTransition()
-
                 activityComposerSection
                     .padding(.top, DS.Spacing.xl)
                     .opacity(appeared ? 1 : 0)
@@ -401,35 +366,8 @@ struct TodayView: View {
                     .animation(DS.Anim.stagger(index: 3), value: appeared)
                     .scrollSectionTransition()
 
-                if let meal = lastMeal {
-                    LastMealCard(entry: meal)
-                        .padding(.horizontal, DS.Spacing.md)
-                        .padding(.top, DS.Spacing.lg)
-                        .opacity(appeared ? 1 : 0)
-                        .offset(y: appeared ? 0 : 20)
-                        .animation(DS.Anim.stagger(index: 3), value: appeared)
-                        .scrollSectionTransition()
-                }
-
-                // Food stats bento — 3 tiles share a glass sampling region
-                GlassEffectContainer(spacing: 18) {
-                    foodStatsSection
-                }
-                .padding(.top, DS.Spacing.md)
-                .opacity(appeared ? 1 : 0)
-                .offset(y: appeared ? 0 : 20)
-                .animation(DS.Anim.stagger(index: 4), value: appeared)
-                .scrollSectionTransition()
-
-                if let hours = fastingHours {
-                    FastingBanner(hours: hours)
-                        .padding(.horizontal, DS.Spacing.md)
-                        .padding(.top, DS.Spacing.lg)
-                        .opacity(appeared ? 1 : 0)
-                        .offset(y: appeared ? 0 : 20)
-                        .animation(DS.Anim.stagger(index: 5), value: appeared)
-                        .scrollSectionTransition()
-                }
+                // Last meal, food-stats bento + fasting moved to the Food tab
+                // (they duplicated Food's own surfaces). FAB keeps logging one tap away.
 
                 if engine.illnessRisk >= 2, let alert = engine.illnessAlert {
                     AlertBanner(icon: "staroflife.fill", message: alert, color: DS.Colors.amber)
@@ -454,14 +392,8 @@ struct TodayView: View {
                     .scrollSectionTransition()
                 }
 
-                if engine.baselineRMSSD.count >= 14 {
-                    baselineDeltaSection
-                        .padding(.top, DS.Spacing.lg)
-                        .opacity(appeared ? 1 : 0)
-                        .offset(y: appeared ? 0 : 20)
-                        .animation(DS.Anim.stagger(index: 8), value: appeared)
-                        .scrollSectionTransition()
-                }
+                // HRV-vs-baseline delta moved to the Health tab (it duplicated the
+                // HRV trend Health already shows).
 
                 // Outside context — weather + PC, grouped under a collapsed
                 // "Context" disclosure so the home screen stays calm but the raw
@@ -582,7 +514,6 @@ struct TodayView: View {
                 strain: engine.strainScore,
                 trend: bbTrend
             )
-                .statusGlow(DS.Colors.bodyBatteryColor(engine.bodyBattery), intensity: 0.7)
                 .padding(.top, DS.Spacing.sm)
 
             // v106: alcohol-night chip. Gives context to a low score so the
@@ -936,7 +867,7 @@ private struct FoodStatCell: View {
 // Drop next to any metric. Internal (not private) so Health can reuse it.
 // MARK: - Tomorrow, Foretold (self-grading recovery oracle)
 
-private struct TomorrowForetoldCard: View {
+struct TomorrowForetoldCard: View {
     let actualRecoveryToday: Double
     @State private var tomorrow: ForecastDay? = nil
     @State private var verdict: (text: String, hit: Bool)? = nil
@@ -1006,7 +937,7 @@ private struct TomorrowForetoldCard: View {
     }
 }
 
-private struct ForecastRangeBar: View {
+struct ForecastRangeBar: View {
     let p10: Double
     let p50: Double
     let p90: Double
