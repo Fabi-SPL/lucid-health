@@ -3153,6 +3153,10 @@ extension BLEManager: CBPeripheralDelegate {
         }
 
         if let temp = WhoopProtocol.parseTemperature(packet.data) {
+            // v152 — reject physiologically-impossible / stuck-glitch readings before
+            // they cache. Only accepted values enter skinTemperature + history + push,
+            // so a bad decode never becomes the baseline and the last good value holds.
+            guard acceptSkinTemp(temp) else { return }
             DispatchQueue.main.async {
                 self.skinTemperature = temp
             }
@@ -3165,6 +3169,27 @@ extension BLEManager: CBPeripheralDelegate {
         } else {
             LucidLog.log("BLE", "TEMP: could not decode \(packet.data.count) bytes")
         }
+    }
+
+    /// v152 — Skin-temp sanity guard (mirrors server migration v152). Two layers:
+    /// (1) physiological gate: worn-wrist skin temp lives in [28, 39]°C; anything
+    ///     outside is a bad decode (e.g. the 41.5°C garbage seen Jul 3).
+    /// (2) slew-rate: skin temp cannot jump ≥2°C within an hour of the last accepted
+    ///     reading — that is a sensor glitch, not physiology. Because only accepted
+    ///     values are recorded in skinTempHistory, a stuck bad value keeps failing
+    ///     against the held-good baseline instead of poisoning it.
+    private func acceptSkinTemp(_ temp: Double) -> Bool {
+        guard temp >= 28.0 && temp <= 39.0 else {
+            LucidLog.log("BLE", "Skin temp \(String(format: "%.1f", temp))°C rejected: out of physiological range")
+            return false
+        }
+        let hourAgo = Date().addingTimeInterval(-3600)
+        if let last = skinTempHistory.last(where: { $0.time >= hourAgo }),
+           abs(temp - last.temp) > 2.0 {
+            LucidLog.log("BLE", "Skin temp \(String(format: "%.1f", temp))°C rejected: slew \(String(format: "%.1f", abs(temp - last.temp)))°C from \(String(format: "%.1f", last.temp))°C in <1h")
+            return false
+        }
+        return true
     }
 
     // MARK: - Double Tap Handler
@@ -4459,7 +4484,7 @@ extension BLEManager: CBPeripheralDelegate {
             // gated" from "no packets ever".
             DispatchQueue.main.async { self.totalType49PacketsSeen += 1 }
 
-            if !isDownloadingHistory, let tempC = WhoopProtocol.parseRealtimeTemperature(data: packet.data) {
+            if !isDownloadingHistory, let tempC = WhoopProtocol.parseRealtimeTemperature(data: packet.data), acceptSkinTemp(tempC) {
                 let hex = packet.data.map { String(format: "%02X", $0) }.joined(separator: " ")
                 LucidLog.log("BLE", "Type-49 temp parsed: \(String(format: "%.2f", tempC))°C from \(packet.data.count) bytes")
                 DispatchQueue.main.async {
