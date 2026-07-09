@@ -125,16 +125,11 @@ struct TodayView: View {
 
     var body: some View {
         ZStack(alignment: .bottomTrailing) {
-            if modeStore.current == .lateNight {
-                lateNightReplacement
-            } else {
-                regularContent
-            }
-
-            // FAB — bottom-right, above tab bar (hidden in late-night)
-            if modeStore.current != .lateNight {
-                fabSection
-            }
+            // Late-night no longer hijacks the screen with a "sleep is the work"
+            // takeover — the body (ring, live stats, alarm) stays visible around
+            // the clock. Mode still shifts tone via ModeBanner + the alarm card.
+            regularContent
+            fabSection
         }
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
@@ -329,6 +324,18 @@ struct TodayView: View {
                         .animation(DS.Anim.cardAppear, value: appeared)
                         .scrollSectionTransition()
 
+                    SmartAlarmCard(bleManager: bleManager)
+                        .padding(.horizontal, DS.Spacing.md)
+                        .padding(.top, DS.Spacing.md)
+                        .opacity(appeared ? 1 : 0)
+                        .animation(DS.Anim.cardAppear, value: appeared)
+                        .scrollSectionTransition()
+                }
+
+                // Late-night (00:00–05:00): surface the one genuinely useful
+                // pre-sleep tool — the smart alarm — right under the ring. No
+                // takeover, no lecture; the body stays on screen.
+                if modeStore.current == .lateNight {
                     SmartAlarmCard(bleManager: bleManager)
                         .padding(.horizontal, DS.Spacing.md)
                         .padding(.top, DS.Spacing.md)
@@ -812,7 +819,9 @@ struct TodayView: View {
         do {
             entries = try await supabase.fetchRecentFoodEntries(limit: 30)
         } catch {
-            self.error = "Load failed"
+            // Food isn't rendered on Today anymore (it lives on the Food tab), so a
+            // background fetch hiccup must NOT blast a screen-wide error. Fail quiet;
+            // keep whatever entries we already have. Only user actions (save) surface.
         }
         isLoading = false
     }
