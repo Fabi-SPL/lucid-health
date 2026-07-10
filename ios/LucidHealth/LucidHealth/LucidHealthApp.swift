@@ -30,10 +30,6 @@ struct LucidHealthApp: App {
     /// session when they open the app.
     @State private var authRefreshTimer: Timer?
 
-    /// Set by `CaptureVoiceIntent` (Action Button / Siri / Apple Intelligence)
-    /// to present the voice capture sheet immediately after foregrounding.
-    @State private var showVoiceCapture = false
-
     var body: some Scene {
         WindowGroup {
             ContentView()
@@ -44,12 +40,6 @@ struct LucidHealthApp: App {
                 }
                 .onChange(of: scenePhase) { _, newPhase in
                     handleScenePhase(newPhase)
-                }
-                .sheet(isPresented: $showVoiceCapture) {
-                    VoiceCaptureView()
-                }
-                .onReceive(NotificationCenter.default.publisher(for: .lucidStartVoiceCapture)) { _ in
-                    showVoiceCapture = true
                 }
         }
     }
