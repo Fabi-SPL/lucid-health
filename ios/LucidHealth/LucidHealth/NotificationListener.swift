@@ -184,9 +184,22 @@ class NotificationListener {
         let content = UNMutableNotificationContent()
         content.title = nudge.title ?? "Lucid"
         content.body = nudge.message
-        content.sound = nudge.priority == "voice" ? .defaultCritical : Self.lucidSound()
-        content.interruptionLevel = nudge.priority == "voice" ? .critical : .timeSensitive
-        content.userInfo = ["nudge_id": nudge.id, "source": "lucid-bridge"]
+
+        if nudge.isSmartWake {
+            // v154 wake alarm — highest interruption + critical sound so it
+            // pierces silent/DND/Focus. The banner alone won't wake a sleeping
+            // person; the strap-buzz actuator (posted below) is the real wake.
+            content.sound = .defaultCritical
+            content.interruptionLevel = .critical
+            var info: [String: Any] = ["nudge_id": nudge.id, "source": "lucid-smart-wake"]
+            if let sid = nudge.sessionId { info["session_id"] = sid }
+            if let reason = nudge.reason { info["reason"] = reason }
+            content.userInfo = info
+        } else {
+            content.sound = nudge.priority == "voice" ? .defaultCritical : Self.lucidSound()
+            content.interruptionLevel = nudge.priority == "voice" ? .critical : .timeSensitive
+            content.userInfo = ["nudge_id": nudge.id, "source": "lucid-bridge"]
+        }
 
         let request = UNNotificationRequest(
             identifier: "nudge-\(nudge.id)",
@@ -199,6 +212,18 @@ class NotificationListener {
             log("Fired notification: \(nudge.title ?? "Lucid") — \(String(nudge.message.prefix(40)))")
         } catch {
             log("Failed to fire notification: \(error.localizedDescription)")
+        }
+
+        // v154: hand off to BLEManager to actually WAKE him — buzz the strap on
+        // his wrist. Decoupled via NotificationCenter so this listener never
+        // needs a BLEManager reference. Dedup upstream (fired-ids) guarantees
+        // this posts at most once per nudge; the actuator is idempotent too.
+        if nudge.isSmartWake {
+            var meta: [String: Any] = ["nudge_id": nudge.id]
+            if let sid = nudge.sessionId { meta["session_id"] = sid }
+            if let reason = nudge.reason { meta["reason"] = reason }
+            NotificationCenter.default.post(name: .lucidSmartWakeFire, object: nil, userInfo: meta)
+            log("Posted .lucidSmartWakeFire — session=\(nudge.sessionId?.prefix(8) ?? "?") reason=\(nudge.reason ?? "?")")
         }
     }
 
@@ -214,10 +239,21 @@ class NotificationListener {
 }
 
 /// Minimal DTO for a pending nudge row.
+///
+/// The v154 smart-wake fields are all optional so every existing nudge row
+/// (Claude-session pushes, mood reminders, etc.) decodes exactly as before —
+/// they simply leave the new fields nil / false.
 struct PendingNudge {
     let id: String
     let title: String?
     let message: String
-    let priority: String  // voice | visual | silent
+    let priority: String  // voice | visual | silent | alarm
     let channels: [String]
+    // v154 smart-wake extensions (from `source` + jsonb `metadata`)
+    var source: String? = nil       // e.g. "health"
+    var metaKind: String? = nil     // metadata.kind — "smart_wake" for a v154 fire
+    var sessionId: String? = nil    // metadata.session_id
+    var reason: String? = nil       // metadata.reason (recovered_early | target_reached | …)
+    /// True when this row is a wake alarm — priority=='alarm' OR a smart_wake kind.
+    var isSmartWake: Bool { priority == "alarm" || metaKind == "smart_wake" }
 }

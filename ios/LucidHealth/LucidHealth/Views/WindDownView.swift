@@ -34,11 +34,13 @@ struct WindDownView: View {
             .ignoresSafeArea()
             .allowsHitTesting(false)
 
-            VStack(spacing: 28) {
-                Spacer()
+            VStack(spacing: 22) {
+                Spacer(minLength: 8)
                 breathingSection
                 planCard.padding(.horizontal, DS.Spacing.lg)
-                Spacer()
+                SmartWakeControl(bleManager: bleManager)
+                    .padding(.horizontal, DS.Spacing.lg)
+                Spacer(minLength: 8)
                 dismissButton
                     .padding(.horizontal, DS.Spacing.lg)
                     .padding(.bottom, DS.Spacing.xl)
@@ -164,5 +166,238 @@ private struct WindDownPressStyle: ButtonStyle {
             .scaleEffect(configuration.isPressed ? 0.97 : 1.0)
             .opacity(configuration.isPressed ? 0.92 : 1.0)
             .animation(.easeOut(duration: 0.16), value: configuration.isPressed)
+    }
+}
+
+// MARK: - Smart Wake Control (v154)
+
+/// "Wake me at the perfect time" — arms the server-side v154 smart-wake engine.
+/// Idle: a primary button + an optional "up by" hard deadline. Armed: the plan
+/// (target, floor, projected window / earliest-wake-in, calm note) + Cancel.
+/// The server picks the exact moment (onset-anchored need, hard floor, never in
+/// deep) and buzzes the strap on fire; this is just the arm + status surface.
+struct SmartWakeControl: View {
+    @ObservedObject var bleManager: BLEManager
+
+    @State private var useDeadline = false
+    @State private var deadline: Date =
+        Calendar.current.date(bySettingHour: 7, minute: 30, second: 0, of: Date()) ?? Date()
+    @State private var busy = false
+
+    private let accent = DS.Colors.violet
+
+    private var armed: Bool { bleManager.smartWakeArmed }
+    private var status: SmartWakeStatus? { bleManager.smartWakeStatus }
+    private var plan: SmartWakePlan? { bleManager.smartWakePlan }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            if armed { armedView } else { idleView }
+        }
+        .padding(DS.Spacing.md)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .accentGlassCard(tint: accent, active: armed)
+        .task { await bleManager.refreshSmartWakeStatus() }
+    }
+
+    // MARK: Idle — arm affordance
+
+    private var idleView: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Button {
+                arm()
+            } label: {
+                HStack(spacing: 8) {
+                    if busy {
+                        ProgressView().tint(.white).scaleEffect(0.8)
+                    } else {
+                        Image(systemName: "sunrise.fill").font(.system(size: 14, weight: .semibold))
+                    }
+                    Text("Wake me at the perfect time")
+                        .font(.system(size: 15, weight: .semibold, design: .rounded))
+                }
+                .foregroundStyle(.white)
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 15)
+                .background(Capsule().fill(accent))
+            }
+            .buttonStyle(WindDownPressStyle())
+            .disabled(busy)
+
+            Button {
+                withAnimation(DS.Anim.quick) { useDeadline.toggle() }
+                DS.Haptic.select()
+            } label: {
+                HStack(spacing: 6) {
+                    Image(systemName: useDeadline ? "checkmark.circle.fill" : "circle")
+                        .font(.system(size: 12))
+                        .foregroundStyle(useDeadline ? accent : DS.Colors.textMuted)
+                    Text("Set a hard \u{201C}up by\u{201D} time")
+                        .font(.system(size: 12, weight: .medium))
+                        .foregroundStyle(DS.Colors.textSecondary)
+                }
+            }
+            .buttonStyle(.plain)
+
+            if useDeadline {
+                DatePicker("", selection: $deadline, displayedComponents: .hourAndMinute)
+                    .datePickerStyle(.compact)
+                    .labelsHidden()
+                    .tint(accent)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                Text("I'll aim to wake you before this. If it's sooner than your sleep floor, I'll tell you to set a normal alarm too.")
+                    .font(.system(size: 10.5))
+                    .foregroundStyle(DS.Colors.textMuted)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+    }
+
+    // MARK: Armed — plan + cancel
+
+    private var armedView: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 6) {
+                Image(systemName: "sunrise.fill")
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(accent)
+                Text("SMART WAKE ARMED")
+                    .font(.system(size: 10, weight: .bold))
+                    .tracking(1.4)
+                    .foregroundStyle(accent)
+                Spacer()
+                if let st = status, st.strapStreaming {
+                    Text("live")
+                        .font(.system(size: 9, weight: .bold))
+                        .foregroundStyle(DS.Colors.success)
+                }
+            }
+
+            // Numbers row — target + floor (tabular).
+            HStack(spacing: 18) {
+                if let t = targetH {
+                    metric(label: "TARGET", value: String(format: "%.1f", t), unit: "h")
+                }
+                if let f = plan?.safetyFloorH {
+                    metric(label: "FLOOR", value: String(format: "%.1f", f), unit: "h")
+                }
+                if let win = status?.projectedWindow {
+                    metric(label: "WINDOW", value: win, unit: "")
+                } else if let inMin = status?.earliestInMin, inMin > 0 {
+                    metric(label: "EARLIEST IN", value: "\(inMin)", unit: "m")
+                }
+            }
+
+            if let note = armedNote, !note.isEmpty {
+                Text(note)
+                    .font(.system(size: 12))
+                    .foregroundStyle(DS.Colors.textSecondary)
+                    .lineSpacing(3)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
+            if plan?.deadlineBelowFloor == true {
+                HStack(alignment: .top, spacing: 6) {
+                    Image(systemName: "exclamationmark.triangle.fill")
+                        .font(.system(size: 11))
+                        .foregroundStyle(DS.Colors.warning)
+                    Text("Your \u{201C}up by\u{201D} time is earlier than your sleep floor. Set a normal alarm too, just in case.")
+                        .font(.system(size: 11, weight: .medium))
+                        .foregroundStyle(DS.Colors.warning)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            } else {
+                // Always nudge to keep a backup — the wrist buzz needs the app
+                // alive overnight; a normal alarm is the belt-and-suspenders net.
+                HStack(alignment: .top, spacing: 6) {
+                    Image(systemName: "alarm")
+                        .font(.system(size: 11))
+                        .foregroundStyle(DS.Colors.textMuted)
+                    Text("Keep a normal alarm as a backup — I wake you from your wrist, not the phone speaker.")
+                        .font(.system(size: 11, weight: .medium))
+                        .foregroundStyle(DS.Colors.textMuted)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+
+            Button {
+                cancel()
+            } label: {
+                HStack(spacing: 6) {
+                    if busy { ProgressView().scaleEffect(0.7) }
+                    Text("Cancel smart wake")
+                        .font(.system(size: 13, weight: .semibold, design: .rounded))
+                }
+                .foregroundStyle(DS.Colors.textSecondary)
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 11)
+                .background(
+                    Capsule().stroke(DS.Colors.border, lineWidth: 1)
+                )
+            }
+            .buttonStyle(WindDownPressStyle())
+            .disabled(busy)
+            .padding(.top, 2)
+        }
+    }
+
+    private func metric(label: String, value: String, unit: String) -> some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Text(label)
+                .font(.system(size: 8, weight: .bold))
+                .tracking(0.7)
+                .foregroundStyle(DS.Colors.textMuted)
+            HStack(alignment: .firstTextBaseline, spacing: 1) {
+                Text(value)
+                    .font(.system(size: 17, weight: .bold, design: .rounded))
+                    .monospacedDigit()
+                    .foregroundStyle(DS.Colors.textPrimary)
+                if !unit.isEmpty {
+                    Text(unit)
+                        .font(.system(size: 10, weight: .semibold))
+                        .foregroundStyle(DS.Colors.textMuted)
+                }
+            }
+        }
+    }
+
+    private var targetH: Double? { plan?.targetH ?? status?.targetH }
+
+    /// Prefer the live status note (updates as he sleeps); fall back to the arm
+    /// note (the calm "here's tonight's plan" explainer).
+    private var armedNote: String? {
+        if let s = status?.note, !s.isEmpty, status?.armed == true { return s }
+        return plan?.note
+    }
+
+    // MARK: Actions
+
+    private func arm() {
+        guard !busy else { return }
+        busy = true
+        DS.Haptic.commit()
+        // The picker only carries an hour:minute; resolve it to the NEXT future
+        // occurrence so an evening arm means tomorrow morning, not today's past.
+        let target = useDeadline ? nextOccurrence(of: deadline) : nil
+        Task {
+            _ = await bleManager.armSmartWake(latestWake: target)
+            await MainActor.run { busy = false }
+        }
+    }
+
+    private func nextOccurrence(of picked: Date) -> Date {
+        let cal = Calendar.current
+        let comps = cal.dateComponents([.hour, .minute], from: picked)
+        return cal.nextDate(after: Date(), matching: comps, matchingPolicy: .nextTime) ?? picked
+    }
+
+    private func cancel() {
+        guard !busy else { return }
+        busy = true
+        DS.Haptic.tap()
+        Task {
+            await bleManager.cancelSmartWake()
+            await MainActor.run { busy = false }
+        }
     }
 }

@@ -87,6 +87,58 @@ struct SleepReadiness {
     let message: String      // plain coaching line
 }
 
+/// v154 smart-wake need components — the four drivers that shape tonight's
+/// sleep target (each a signed hours delta baked into `target_h`).
+struct SmartWakeComponents {
+    let debt: Double
+    let strain: Double
+    let quality: Double
+    let circadian: Double
+}
+
+/// Result of arming the v154 smart-wake engine (`arm_smart_wake` RPC). The
+/// clock only starts when he actually falls asleep; `targetH` is the
+/// onset-anchored sleep need, `safetyFloorH` the hard "never wake short" floor.
+/// `deadlineBelowFloor` = the requested "up by" is sooner than the floor → the
+/// UI must warn him to also set a normal alarm.
+struct SmartWakePlan {
+    let sessionId: String
+    let status: String            // "armed"
+    let targetH: Double           // e.g. 8.9
+    let baseH: Double
+    let safetyFloorH: Double       // e.g. 6.23
+    let latestWakeLabel: String?   // "07:30" or nil
+    let latestWakeAtISO: String?
+    let deadlineBelowFloor: Bool
+    let prepMin: Int
+    let note: String               // calm-voice explainer
+    let needBreakdown: String      // "base 8.00h +0.75 debt … → 8.90h"
+    let components: SmartWakeComponents
+}
+
+/// Live status of the v154 smart-wake engine (`smart_wake_status` RPC).
+/// Idle → armed=false. Armed pre-onset → target + latestWakeLabel only.
+/// Armed post-onset → the richer window/onset/earliest/backstop fields.
+struct SmartWakeStatus {
+    let armed: Bool
+    let status: String             // idle | armed | asleep | ready
+    let note: String
+    let sessionId: String?
+    let targetH: Double?
+    let strapStreaming: Bool
+    let latestWakeLabel: String?
+    // post-onset (nil until he falls asleep)
+    let onsetLabel: String?        // "23:42"
+    let asleepH: Double?           // hours asleep so far
+    let earliestWakeLabel: String? // hard floor time "05:48"
+    let earliestInMin: Int?        // minutes until the floor (nil once past it)
+    let targetWakeLabel: String?   // ideal target time
+    let backstopLabel: String?     // humane latest time
+    let projectedWindow: String?   // "05:48–08:30"
+    let currentStage: String?      // deep | light_rem | no_signal
+    let currentDeepProb: Double?
+}
+
 class SupabaseClient {
 
     // Singleton — shared by app + BLEManager + Foods views
@@ -642,6 +694,145 @@ class SupabaseClient {
         guard let date = withFrac.date(from: iso) ?? plain.date(from: iso) else { return nil }
         let c = Calendar.current.dateComponents([.hour, .minute], from: date)
         return (c.hour ?? 0) * 60 + (c.minute ?? 0)
+    }
+
+    // MARK: - v154 Smart Wake (onset-anchored adaptive wake engine)
+
+    /// Arm the server-side smart-wake engine. It decides tonight's exact wake
+    /// moment (onset-anchored sleep need, hard floor, never-in-deep) and, on
+    /// fire, writes an alarm nudge the app turns into a strap buzz. `latestWake`
+    /// is an optional hard "up by" deadline; `prepMin` shifts the wake earlier
+    /// to leave prep time. Returns nil on any failure so the UI can fall back.
+    func armSmartWake(latestWake: Date? = nil, prepMin: Int = 30) async -> SmartWakePlan? {
+        do {
+            try await ensureAuth()
+            guard let token = accessToken else { return nil }
+            var body: [String: Any] = ["p_user_id": userId, "p_prep_min": prepMin]
+            if let latestWake = latestWake {
+                let iso = ISO8601DateFormatter()
+                iso.formatOptions = [.withInternetDateTime]
+                body["p_latest_wake"] = iso.string(from: latestWake)
+            }
+            let url = URL(string: "\(baseURL)/rest/v1/rpc/arm_smart_wake")!
+            var req = URLRequest(url: url)
+            req.httpMethod = "POST"
+            req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+            req.setValue(anonKey, forHTTPHeaderField: "apikey")
+            req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+            req.httpBody = try JSONSerialization.data(withJSONObject: body)
+            let (data, resp) = try await session.data(for: req)
+            let code = (resp as? HTTPURLResponse)?.statusCode ?? 0
+            guard code < 300 else { log("arm_smart_wake HTTP \(code)"); return nil }
+
+            let obj: [String: Any]?
+            if let arr = try JSONSerialization.jsonObject(with: data) as? [[String: Any]] {
+                obj = arr.first
+            } else {
+                obj = try JSONSerialization.jsonObject(with: data) as? [String: Any]
+            }
+            guard let p = obj else { return nil }
+            let comp = p["components"] as? [String: Any] ?? [:]
+            let plan = SmartWakePlan(
+                sessionId: (p["session_id"] as? String) ?? "",
+                status: (p["status"] as? String) ?? "armed",
+                targetH: (p["target_h"] as? NSNumber)?.doubleValue ?? 0,
+                baseH: (p["base_h"] as? NSNumber)?.doubleValue ?? 0,
+                safetyFloorH: (p["safety_floor_h"] as? NSNumber)?.doubleValue ?? 0,
+                latestWakeLabel: p["latest_wake_label"] as? String,
+                latestWakeAtISO: p["latest_wake_at"] as? String,
+                deadlineBelowFloor: (p["deadline_below_floor"] as? Bool) ?? false,
+                prepMin: (p["prep_min"] as? NSNumber)?.intValue ?? prepMin,
+                note: (p["note"] as? String) ?? "",
+                needBreakdown: (p["need_breakdown"] as? String) ?? "",
+                components: SmartWakeComponents(
+                    debt: (comp["debt"] as? NSNumber)?.doubleValue ?? 0,
+                    strain: (comp["strain"] as? NSNumber)?.doubleValue ?? 0,
+                    quality: (comp["quality"] as? NSNumber)?.doubleValue ?? 0,
+                    circadian: (comp["circadian"] as? NSNumber)?.doubleValue ?? 0
+                )
+            )
+            log("arm_smart_wake → target=\(plan.targetH)h floor=\(plan.safetyFloorH)h belowFloor=\(plan.deadlineBelowFloor)")
+            return plan
+        } catch {
+            log("arm_smart_wake error: \(error.localizedDescription)")
+            return nil
+        }
+    }
+
+    /// Cancel any armed smart-wake session. Returns true on success.
+    @discardableResult
+    func cancelSmartWake() async -> Bool {
+        do {
+            try await ensureAuth()
+            guard let token = accessToken else { return false }
+            let body: [String: Any] = ["p_user_id": userId]
+            let url = URL(string: "\(baseURL)/rest/v1/rpc/cancel_smart_wake")!
+            var req = URLRequest(url: url)
+            req.httpMethod = "POST"
+            req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+            req.setValue(anonKey, forHTTPHeaderField: "apikey")
+            req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+            req.httpBody = try JSONSerialization.data(withJSONObject: body)
+            let (_, resp) = try await session.data(for: req)
+            let code = (resp as? HTTPURLResponse)?.statusCode ?? 0
+            guard code < 300 else { log("cancel_smart_wake HTTP \(code)"); return false }
+            log("cancel_smart_wake ok")
+            return true
+        } catch {
+            log("cancel_smart_wake error: \(error.localizedDescription)")
+            return false
+        }
+    }
+
+    /// Read the live smart-wake status (idle / armed / asleep / ready). Returns
+    /// nil on any failure so the UI just hides the plan surface.
+    func fetchSmartWakeStatus() async -> SmartWakeStatus? {
+        do {
+            try await ensureAuth()
+            guard let token = accessToken else { return nil }
+            let body: [String: Any] = ["p_user_id": userId]
+            let url = URL(string: "\(baseURL)/rest/v1/rpc/smart_wake_status")!
+            var req = URLRequest(url: url)
+            req.httpMethod = "POST"
+            req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+            req.setValue(anonKey, forHTTPHeaderField: "apikey")
+            req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+            req.httpBody = try JSONSerialization.data(withJSONObject: body)
+            let (data, resp) = try await session.data(for: req)
+            let code = (resp as? HTTPURLResponse)?.statusCode ?? 0
+            guard code < 300 else { log("smart_wake_status HTTP \(code)"); return nil }
+
+            let obj: [String: Any]?
+            if let arr = try JSONSerialization.jsonObject(with: data) as? [[String: Any]] {
+                obj = arr.first
+            } else {
+                obj = try JSONSerialization.jsonObject(with: data) as? [String: Any]
+            }
+            guard let p = obj else { return nil }
+            let st = SmartWakeStatus(
+                armed: (p["armed"] as? Bool) ?? false,
+                status: (p["status"] as? String) ?? "idle",
+                note: (p["note"] as? String) ?? "",
+                sessionId: p["session_id"] as? String,
+                targetH: (p["target_h"] as? NSNumber)?.doubleValue,
+                strapStreaming: (p["strap_streaming"] as? Bool) ?? false,
+                latestWakeLabel: p["latest_wake_label"] as? String,
+                onsetLabel: p["onset_label"] as? String,
+                asleepH: (p["asleep_h"] as? NSNumber)?.doubleValue,
+                earliestWakeLabel: p["earliest_wake_label"] as? String,
+                earliestInMin: (p["earliest_in_min"] as? NSNumber)?.intValue,
+                targetWakeLabel: p["target_wake_label"] as? String,
+                backstopLabel: p["backstop_label"] as? String,
+                projectedWindow: p["projected_window"] as? String,
+                currentStage: p["current_stage"] as? String,
+                currentDeepProb: (p["current_deep_prob"] as? NSNumber)?.doubleValue
+            )
+            log("smart_wake_status → armed=\(st.armed) status=\(st.status)")
+            return st
+        } catch {
+            log("smart_wake_status error: \(error.localizedDescription)")
+            return nil
+        }
     }
 
     /// In-window wake coach. Pass when the user fell asleep (HealthEngine
@@ -2369,7 +2560,17 @@ class SupabaseClient {
             let title = row["title"] as? String
             let priority = row["priority"] as? String ?? "visual"
             let channels = row["channels"] as? [String] ?? ["push"]
-            return PendingNudge(id: id, title: title, message: message, priority: priority, channels: channels)
+            // v154: decode the smart-wake delivery fields. metadata is a jsonb
+            // object; all fields optional so non-smart-wake rows are unaffected.
+            let source = row["source"] as? String
+            let meta = row["metadata"] as? [String: Any]
+            return PendingNudge(
+                id: id, title: title, message: message, priority: priority, channels: channels,
+                source: source,
+                metaKind: meta?["kind"] as? String,
+                sessionId: meta?["session_id"] as? String,
+                reason: meta?["reason"] as? String
+            )
         }
     }
 
