@@ -12,6 +12,11 @@ extension Notification.Name {
     /// and re-creates pushTimer with the appropriate interval (1s while
     /// broadcasting, 10s otherwise to save phone battery + bandwidth).
     static let lucidHFBToggleChanged = Notification.Name("lucidHFBToggleChanged")
+    /// v154 smart-wake fire. NotificationListener posts this (with session_id +
+    /// reason in userInfo) when the server writes the alarm nudge; BLEManager
+    /// observes it and runs the strap-buzz actuator to actually wake him.
+    /// Decoupled via NotificationCenter so the listener needs no BLEManager ref.
+    static let lucidSmartWakeFire = Notification.Name("lucidSmartWakeFire")
 }
 
 @main
@@ -25,6 +30,10 @@ struct LucidHealthApp: App {
     /// session when they open the app.
     @State private var authRefreshTimer: Timer?
 
+    /// Set by `CaptureVoiceIntent` (Action Button / Siri / Apple Intelligence)
+    /// to present the voice capture sheet immediately after foregrounding.
+    @State private var showVoiceCapture = false
+
     var body: some Scene {
         WindowGroup {
             ContentView()
@@ -35,6 +44,12 @@ struct LucidHealthApp: App {
                 }
                 .onChange(of: scenePhase) { _, newPhase in
                     handleScenePhase(newPhase)
+                }
+                .sheet(isPresented: $showVoiceCapture) {
+                    VoiceCaptureView()
+                }
+                .onReceive(NotificationCenter.default.publisher(for: .lucidStartVoiceCapture)) { _ in
+                    showVoiceCapture = true
                 }
         }
     }
@@ -49,6 +64,10 @@ struct LucidHealthApp: App {
                 await SupabaseClient.shared.signInIfNeeded()
                 NotificationCenter.default.post(name: .lucidAuthChanged, object: nil)
             }
+            // v154: reconcile the local smart-wake armed flag with server truth
+            // on every foreground — clears it once the server session completes
+            // (post-wake / next day), re-enabling the local light-sleep detector.
+            Task { await bleManager.refreshSmartWakeStatus() }
             startAuthRefreshTimer()
         case .background, .inactive:
             stopAuthRefreshTimer()

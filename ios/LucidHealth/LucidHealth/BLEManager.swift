@@ -27,6 +27,16 @@ class BLEManager: NSObject, ObservableObject {
     @Published var tonightPlanNote: String = ""
     @Published var tonightWindowStart: Int = 0
     @Published var tonightWindowEnd: Int = 0
+
+    // v154 Smart Wake — server-driven adaptive wake. When armed, the SERVER is
+    // the primary wake trigger (it owns the hard sleep-need floor + never-in-deep
+    // rule); the local light-sleep detector defers to it. Persisted so the flag
+    // + logic survive an app relaunch during the night.
+    static let smartWakeArmedKey = "lucid_smart_wake_armed"
+    @Published var smartWakeArmed: Bool = UserDefaults.standard.bool(forKey: BLEManager.smartWakeArmedKey)
+    @Published var smartWakePlan: SmartWakePlan?
+    @Published var smartWakeStatus: SmartWakeStatus?
+
     @Published var battery: Double = 0
     @Published var deviceClock: Date?
     @Published var isWorn: Bool = false
@@ -150,6 +160,14 @@ class BLEManager: NSObject, ObservableObject {
 
     // MARK: - Fallback Alarm ID (must be in main class body, not extension)
     let fallbackAlarmId = "lucid_fallback_alarm"
+
+    // MARK: - Smart-wake actuator idempotency (double-fire prevention)
+    // Set on EVERY wake-actuator fire (server nudge OR local light detection).
+    // Any second entry within the window is skipped so he's never buzzed twice.
+    private var lastActuatorFireAt: Date?
+    private var lastActuatedSessionId: String?
+    private let actuatorDedupWindow: TimeInterval = 8 * 60   // ~8 min
+    private let smartWakeBackupId = "lucid_smartwake_backup"
 
     // MARK: - Sleep onset tracking (for sleep timing/consistency)
     private var lastSleepOnsetTime: Date?
@@ -394,44 +412,41 @@ class BLEManager: NSObject, ObservableObject {
         healthEngine.onSmartAlarmTrigger { [weak self] stage in
             guard let self = self else { return }
             self.log("SMART ALARM! Stage: \(stage.rawValue) — progressive ramp")
-            // Log the wake EXECUTION — strap connectivity is the key unknown when
-            // an alarm "fires but doesn't wake him" (haptic can't reach a dropped
-            // strap). canBuzz = peripheral + command characteristic both present.
-            let canBuzz = self.peripheral != nil && self.cmdToStrap != nil
-            self.evt("alarm_fired", "stage=\(stage.rawValue) canBuzz=\(canBuzz) hr=\(self.heartRate) batt=\(Int(self.battery))%")
-            // Each ESCALATION pulse first checks he hasn't already woken from an
-            // earlier pulse — no point buzzing harder at someone who's up. Only
-            // the gentle opener fires unconditionally (that's the wake itself).
-            func escalateIfAsleep(_ pattern: UInt8) {
-                if self.healthEngine.isLikelyAwakeNow {
-                    self.evt("alarm_pulse_skip", "pattern=\(pattern) reason=already-awake hr=\(self.heartRate)")
-                    self.forceStopHaptics(); return
-                }
-                self.evt("alarm_pulse", "pattern=\(pattern) canBuzz=\(self.peripheral != nil && self.cmdToStrap != nil)")
-                self.sendHapticRaw(pattern)
+            // v154 reconciliation: when a server smart-wake session owns tonight,
+            // the SERVER is the primary trigger (it enforces the hard sleep-need
+            // floor + never-in-deep rule the local detector doesn't know). Defer;
+            // the scheduleFallbackAlarm net stays as the ultimate safety.
+            if self.smartWakeArmed {
+                self.evt("smart_alarm_defer", "reason=v154_armed stage=\(stage.rawValue)")
+                return
             }
-            // Gentle opening pulse (pattern 0)
-            self.sendHapticRaw(0)
-            self.bleQueue.asyncAfter(deadline: .now() + 0.5) { self.forceStopHaptics() }
-            // Mid pulse (pattern 1) at +20s — stronger, still soft
-            self.bleQueue.asyncAfter(deadline: .now() + 20.0) { escalateIfAsleep(1) }
-            self.bleQueue.asyncAfter(deadline: .now() + 20.5) { self.forceStopHaptics() }
-            // Stronger pulse (pattern 2) at +45s
-            self.bleQueue.asyncAfter(deadline: .now() + 45.0) { escalateIfAsleep(2) }
-            self.bleQueue.asyncAfter(deadline: .now() + 45.5) { self.forceStopHaptics() }
-            // Final double-buzz at +75s if still asleep — escalation peak
-            self.bleQueue.asyncAfter(deadline: .now() + 75.0) { escalateIfAsleep(2) }
-            self.bleQueue.asyncAfter(deadline: .now() + 75.5) { self.forceStopHaptics() }
-            self.bleQueue.asyncAfter(deadline: .now() + 77.0) { escalateIfAsleep(2) }
-            self.bleQueue.asyncAfter(deadline: .now() + 77.5) { self.forceStopHaptics() }
-            // Backup stop — fires even if connection drops and reconnects
-            self.bleQueue.asyncAfter(deadline: .now() + 80.0) { self.forceStopHaptics() }
-
+            // Idempotency: skip if any wake actuator already fired in the window
+            // (guards the overlap right after a v154 fire, even once armed clears).
+            if self.recentlyActuated() {
+                self.evt("alarm_skip", "reason=recent-actuation stage=\(stage.rawValue)")
+                return
+            }
+            self.markActuatorFired(sessionId: nil)
+            // Strap-buzz + progressive haptic ramp (the tuned wake mechanism).
+            self.fireWakeHapticRamp(reasonLabel: "stage=\(stage.rawValue)")
             // Cancel the fallback alarm — smart alarm fired, no need for safety net notification
             self.cancelFallbackAlarm()
-
             // Also send iOS notification so it shows on lock screen
             self.sendAlarmNotification(stage: stage)
+        }
+
+        // v154 server smart-wake: NotificationListener posts .lucidSmartWakeFire
+        // when the server writes the alarm nudge. Run the SAME strap-buzz
+        // actuator here (decoupled via NotificationCenter — no BLEManager ref in
+        // the listener). Idempotent, so a 30s re-poll never re-buzzes.
+        NotificationCenter.default.addObserver(
+            forName: .lucidSmartWakeFire, object: nil, queue: .main
+        ) { [weak self] note in
+            guard let self = self else { return }
+            let sid = note.userInfo?["session_id"] as? String
+            let reason = (note.userInfo?["reason"] as? String) ?? "unknown"
+            self.log("Received .lucidSmartWakeFire — session=\(sid?.prefix(8) ?? "?") reason=\(reason)")
+            self.runSmartWakeActuator(sessionId: sid, reason: reason)
         }
 
         // Round-alarm: SleepEngine calls this when it detects he's already awake,
@@ -4061,6 +4076,179 @@ extension BLEManager: CBPeripheralDelegate {
         scheduleFallbackAlarm()
         log("Applied tonight plan: mode=\(plan.mode) window=\(plan.windowStartMinutes)-\(plan.windowEndMinutes)")
         evt("plan_applied", "mode=\(plan.mode) window=\(plan.windowStartMinutes)-\(plan.windowEndMinutes)")
+    }
+
+    // MARK: - v154 Smart Wake (server-driven actuator + arm/cancel/status)
+
+    /// True if a wake actuator fired within the dedup window — used to prevent
+    /// the server nudge + local light-sleep detection from double-buzzing.
+    private func recentlyActuated() -> Bool {
+        guard let at = lastActuatorFireAt else { return false }
+        return Date().timeIntervalSince(at) < actuatorDedupWindow
+    }
+
+    /// Record an actuator fire for idempotency. Single source of truth for both
+    /// the server-nudge path and the local light-sleep path.
+    private func markActuatorFired(sessionId: String?) {
+        lastActuatorFireAt = Date()
+        if let sessionId = sessionId { lastActuatedSessionId = sessionId }
+    }
+
+    /// The progressive strap-buzz + haptic wake ramp — extracted verbatim from
+    /// the local smart-alarm callback so the v154 server path reuses the EXACT
+    /// same tuned mechanism (gentle → escalate → peak over ~80s, each escalation
+    /// gated on "already awake"). Runs on the BLE queue like the original.
+    func fireWakeHapticRamp(reasonLabel: String) {
+        // Log the wake EXECUTION — strap connectivity is the key unknown when an
+        // alarm "fires but doesn't wake him" (haptic can't reach a dropped strap).
+        let canBuzz = self.peripheral != nil && self.cmdToStrap != nil
+        self.evt("alarm_fired", "\(reasonLabel) canBuzz=\(canBuzz) hr=\(self.heartRate) batt=\(Int(self.battery))%")
+        // Each ESCALATION pulse first checks he hasn't already woken from an
+        // earlier pulse — no point buzzing harder at someone who's up. Only the
+        // gentle opener fires unconditionally (that's the wake itself).
+        func escalateIfAsleep(_ pattern: UInt8) {
+            if self.healthEngine.isLikelyAwakeNow {
+                self.evt("alarm_pulse_skip", "pattern=\(pattern) reason=already-awake hr=\(self.heartRate)")
+                self.forceStopHaptics(); return
+            }
+            self.evt("alarm_pulse", "pattern=\(pattern) canBuzz=\(self.peripheral != nil && self.cmdToStrap != nil)")
+            self.sendHapticRaw(pattern)
+        }
+        // Gentle opening pulse (pattern 0)
+        self.sendHapticRaw(0)
+        self.bleQueue.asyncAfter(deadline: .now() + 0.5) { self.forceStopHaptics() }
+        // Mid pulse (pattern 1) at +20s — stronger, still soft
+        self.bleQueue.asyncAfter(deadline: .now() + 20.0) { escalateIfAsleep(1) }
+        self.bleQueue.asyncAfter(deadline: .now() + 20.5) { self.forceStopHaptics() }
+        // Stronger pulse (pattern 2) at +45s
+        self.bleQueue.asyncAfter(deadline: .now() + 45.0) { escalateIfAsleep(2) }
+        self.bleQueue.asyncAfter(deadline: .now() + 45.5) { self.forceStopHaptics() }
+        // Final double-buzz at +75s if still asleep — escalation peak
+        self.bleQueue.asyncAfter(deadline: .now() + 75.0) { escalateIfAsleep(2) }
+        self.bleQueue.asyncAfter(deadline: .now() + 75.5) { self.forceStopHaptics() }
+        self.bleQueue.asyncAfter(deadline: .now() + 77.0) { escalateIfAsleep(2) }
+        self.bleQueue.asyncAfter(deadline: .now() + 77.5) { self.forceStopHaptics() }
+        // Backup stop — fires even if connection drops and reconnects
+        self.bleQueue.asyncAfter(deadline: .now() + 80.0) { self.forceStopHaptics() }
+    }
+
+    /// v154 server-driven wake actuator. Runs the SAME strap-buzz ramp as the
+    /// local smart alarm plus a lock-screen critical ping. IDEMPOTENT: if any
+    /// wake fired in the last ~8 min it skips — so the server nudge, a 30s
+    /// re-poll, and the local detector can never stack into a double buzz.
+    func runSmartWakeActuator(sessionId: String?, reason: String) {
+        if recentlyActuated() {
+            let ago = lastActuatorFireAt.map { Int(Date().timeIntervalSince($0)) } ?? -1
+            evt("smart_wake_skip", "reason=recent-fire ago=\(ago)s session=\(sessionId?.prefix(8) ?? "?")")
+            return
+        }
+        markActuatorFired(sessionId: sessionId)
+        evt("smart_wake_fire", "reason=\(reason) session=\(sessionId?.prefix(8) ?? "?")")
+
+        // The real wake — buzz the strap on his wrist (a banner can't wake him).
+        fireWakeHapticRamp(reasonLabel: "smart_wake reason=\(reason)")
+        // Lock-screen critical ping — reuse the existing tuned buzz chain.
+        scheduleAlarmBuzzChain(
+            title: wakeTitle(),
+            body: "Smart wake — the right moment to get up.",
+            count: 1, spacingSec: 2, firstDelaySec: 0.1,
+            idPrefix: "lucid_smart_alarm"
+        )
+        // The wake fired — cancel the safety-net fallback + deadline backup so he
+        // isn't buzzed again later. (The fallback MECHANISM stays for future nights.)
+        cancelFallbackAlarm()
+        cancelSmartWakeBackup()
+    }
+
+    /// Persist + publish the armed flag. Thread-safe from any queue.
+    private func setSmartWakeArmed(_ armed: Bool) {
+        UserDefaults.standard.set(armed, forKey: Self.smartWakeArmedKey)
+        DispatchQueue.main.async { self.smartWakeArmed = armed }
+    }
+
+    /// Arm the v154 engine for tonight. Sets the local ownership flag (so the UI +
+    /// local detector defer to the server), keeps the fallback net active, and —
+    /// when a hard "up by" deadline is given — schedules an independent critical
+    /// backup at that time so he wakes even if BOTH the nudge and buzz fail.
+    @discardableResult
+    func armSmartWake(latestWake: Date? = nil, prepMin: Int = 30) async -> SmartWakePlan? {
+        let plan = await supabase.armSmartWake(latestWake: latestWake, prepMin: prepMin)
+        guard let plan = plan else {
+            evt("smart_wake_arm_failed", "")
+            return nil
+        }
+        setSmartWakeArmed(true)
+        DispatchQueue.main.async { self.smartWakePlan = plan }
+        evt("smart_wake_armed", "target=\(plan.targetH)h floor=\(plan.safetyFloorH)h deadline=\(plan.latestWakeLabel ?? "none") belowFloor=\(plan.deadlineBelowFloor)")
+        // Keep the ultimate safety net active for tonight (uses the user's own
+        // alarm settings; never removed — do NOT rely on it as the primary wake).
+        scheduleFallbackAlarm()
+        // Hard critical backup at the requested deadline (esp. below-floor case).
+        if let dl = latestWake {
+            scheduleSmartWakeBackup(at: dl)
+        } else {
+            // No deadline: scheduleFallbackAlarm() above no-ops unless the user's
+            // own alarm toggle (or alcohol mode) is on. Guarantee an OS-level
+            // backstop that fires even from a KILLED app — the nudge→strap path
+            // needs the app alive, this doesn't. ~10.5h out is later than the
+            // server's onset+9.5h humane cap (onset > arm-time), so it never
+            // pre-empts the real wake — it only catches total-failure oversleep.
+            let d = UserDefaults.standard
+            let fallbackWillFire = d.bool(forKey: "lucid_alcohol_active") || d.bool(forKey: "lucid_alarm_enabled")
+            if !fallbackWillFire {
+                scheduleSmartWakeBackup(at: Date(timeIntervalSinceNow: 10.5 * 3600))
+            }
+        }
+        await refreshSmartWakeStatus()
+        return plan
+    }
+
+    /// Cancel tonight's smart-wake session and clear all local ownership state.
+    func cancelSmartWake() async {
+        _ = await supabase.cancelSmartWake()
+        setSmartWakeArmed(false)
+        DispatchQueue.main.async { self.smartWakePlan = nil }
+        cancelSmartWakeBackup()
+        evt("smart_wake_cancelled", "")
+        await refreshSmartWakeStatus()
+    }
+
+    /// Pull the live status and reconcile the local armed flag with server truth.
+    /// Once the server session completes (post-wake / next day) the status goes
+    /// idle → we clear the local flag, re-enabling the local light-sleep detector.
+    func refreshSmartWakeStatus() async {
+        let st = await supabase.fetchSmartWakeStatus()
+        DispatchQueue.main.async { self.smartWakeStatus = st }
+        if let st = st, st.armed != self.smartWakeArmed {
+            setSmartWakeArmed(st.armed)
+        }
+    }
+
+    /// Independent hard-deadline backup for an armed night — one critical
+    /// notification at the user's "up by" time. Own id so it never clobbers the
+    /// nightly fallback. Guarantees a wake even if the whole nudge+buzz path
+    /// fails (fail toward waking, never toward silence).
+    private func scheduleSmartWakeBackup(at date: Date) {
+        let center = UNUserNotificationCenter.current()
+        center.removePendingNotificationRequests(withIdentifiers: [smartWakeBackupId])
+        guard date > Date() else { return }
+        let comps = Calendar.current.dateComponents(
+            [.year, .month, .day, .hour, .minute, .second], from: date)
+        let content = UNMutableNotificationContent()
+        content.title = wakeTitle()
+        content.body = "Backup alarm — your set time is here."
+        content.sound = UNNotificationSound.defaultCritical
+        content.interruptionLevel = .timeSensitive
+        content.threadIdentifier = fallbackAlarmId
+        let trigger = UNCalendarNotificationTrigger(dateMatching: comps, repeats: false)
+        center.add(UNNotificationRequest(identifier: smartWakeBackupId, content: content, trigger: trigger))
+        let h = Calendar.current.component(.hour, from: date)
+        let m = Calendar.current.component(.minute, from: date)
+        log("Smart-wake deadline backup armed at \(h):\(String(format: "%02d", m))")
+    }
+
+    private func cancelSmartWakeBackup() {
+        UNUserNotificationCenter.current().removePendingNotificationRequests(withIdentifiers: [smartWakeBackupId])
     }
 
     /// Wind-down nudge with a rendered image attachment (first use of
