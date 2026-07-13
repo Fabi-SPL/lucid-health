@@ -22,8 +22,26 @@ struct InsightCard: View {
 
     @State private var appeared = false
 
+    private var isLucid: Bool { pattern.source == .lucid }
+    private var provenanceColor: Color { isLucid ? DS.Colors.teal : DS.Colors.violet }
+
+    private var provenanceBadge: some View {
+        HStack(spacing: 4) {
+            Image(systemName: isLucid ? "diamond.fill" : "sparkles")
+                .font(.system(size: 8, weight: .bold))
+            Text(isLucid ? "LUCID · computed" : "GEMINI · AI guess")
+                .font(.system(size: 9, weight: .bold, design: .rounded))
+                .tracking(0.5)
+        }
+        .foregroundStyle(provenanceColor)
+        .padding(.horizontal, 7)
+        .padding(.vertical, 3)
+        .background(Capsule().fill(provenanceColor.opacity(0.12)))
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: DS.Spacing.sm) {
+            provenanceBadge
             HStack(alignment: .top) {
                 VStack(alignment: .leading, spacing: 4) {
                     Text(pattern.title)
@@ -62,6 +80,18 @@ struct InsightCard: View {
                 }
             }
             .frame(height: 3)
+
+            if let note = pattern.dataQualityNote {
+                HStack(alignment: .top, spacing: 6) {
+                    Image(systemName: "exclamationmark.circle")
+                        .font(.system(size: 10, weight: .semibold))
+                        .foregroundStyle(DS.Colors.amber)
+                    Text(note)
+                        .font(.system(size: 10.5, weight: .regular))
+                        .foregroundStyle(DS.Colors.textFaint)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
         }
         .padding(DS.Spacing.lg)
         .glassDefault()
@@ -90,8 +120,12 @@ struct FoodPattern: Identifiable {
     let confidenceValue: Double    // 0.0–1.0
     let effectDescription: String?
     let effectPositive: Bool
+    let source: Source             // who made this connection
+    let dataQualityNote: String?   // e.g. "logging inconsistent — read loosely"
 
     enum ConfidenceTier { case high, medium, low }
+    // Provenance: .lucid = deterministic correlation we computed. .gemini = AI-generated, speculative.
+    enum Source { case lucid, gemini }
 
     init(
         id: UUID = UUID(),
@@ -100,7 +134,9 @@ struct FoodPattern: Identifiable {
         confidenceTier: ConfidenceTier,
         confidenceValue: Double,
         effectDescription: String? = nil,
-        effectPositive: Bool = true
+        effectPositive: Bool = true,
+        source: Source = .lucid,
+        dataQualityNote: String? = nil
     ) {
         self.id = id
         self.title = title
@@ -109,5 +145,7 @@ struct FoodPattern: Identifiable {
         self.confidenceValue = confidenceValue
         self.effectDescription = effectDescription
         self.effectPositive = effectPositive
+        self.source = source
+        self.dataQualityNote = dataQualityNote
     }
 }

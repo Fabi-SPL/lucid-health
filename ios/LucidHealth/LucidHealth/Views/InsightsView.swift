@@ -18,6 +18,7 @@ struct InsightsView: View {
     @State private var lastNight: SleepRestlessness? = nil
     @State private var illness: IllnessRisk? = nil
     @State private var dailyMetrics: [DailyMetric] = []
+    @State private var crossDomain: [FoodPattern] = []
 
     private static let minimumEntries = 14
 
@@ -78,6 +79,22 @@ struct InsightsView: View {
                             .offset(y: appeared ? 0 : 20)
                             .opacity(appeared ? 1 : 0)
                             .animation(DS.Anim.stagger(index: 1), value: appeared)
+
+                        // Cross-domain connections (Lucid computed + Gemini speculative) — the new engine
+                        if !crossDomain.isEmpty {
+                            CrossDomainHeader()
+                                .padding(.horizontal, DS.Spacing.md)
+                                .offset(y: appeared ? 0 : 20)
+                                .opacity(appeared ? 1 : 0)
+                                .animation(DS.Anim.stagger(index: 2), value: appeared)
+                            ForEach(Array(crossDomain.enumerated()), id: \.element.id) { i, p in
+                                InsightCard(pattern: p)
+                                    .padding(.horizontal, DS.Spacing.md)
+                                    .offset(y: appeared ? 0 : 20)
+                                    .opacity(appeared ? 1 : 0)
+                                    .animation(DS.Anim.stagger(index: i + 3), value: appeared)
+                            }
+                        }
 
                         // Featured pattern hero + diverging impact bars (v6 mockup)
                         if let top = patterns.max(by: { $0.confidenceValue < $1.confidenceValue }) {
@@ -240,6 +257,7 @@ struct InsightsView: View {
         do { entries = try await SupabaseClient.shared.fetchRecentFoodEntries(limit: 90) } catch { }
         entryCount = entries.count
         patterns = InsightEngine.compute(entries: entries, metrics: metrics)
+        crossDomain = await SupabaseClient.shared.fetchCrossDomainInsights()
         isLoading = false
         // Last-night signals load independently (don't gate the patterns view on them).
         lastNight = await SupabaseClient.shared.fetchSleepRestlessness()
@@ -316,6 +334,41 @@ private struct LastNightCard: View {
         case "elevated": return DS.Colors.danger
         case "watch":    return DS.Colors.amber
         default:         return DS.Colors.teal
+        }
+    }
+}
+
+// MARK: - Cross-Domain Header (legend: Lucid computed vs Gemini AI)
+
+private struct CrossDomainHeader: View {
+    var body: some View {
+        VStack(alignment: .leading, spacing: 7) {
+            TwoToneHeadline(
+                primary: "Cross-domain",
+                secondary: " · what connects",
+                font: .system(size: 15, weight: .bold, design: .rounded)
+            )
+            Text("Connections across food, movement, PC, and health.")
+                .font(.system(size: 11, weight: .regular))
+                .foregroundStyle(DS.Colors.textSecondary)
+            HStack(spacing: 12) {
+                legend(icon: "diamond.fill", label: "Lucid · computed", color: DS.Colors.teal)
+                legend(icon: "sparkles", label: "Gemini · AI guess", color: DS.Colors.violet)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(DS.Spacing.md)
+        .glassDefault()
+    }
+
+    private func legend(icon: String, label: String, color: Color) -> some View {
+        HStack(spacing: 4) {
+            Image(systemName: icon)
+                .font(.system(size: 9, weight: .bold))
+                .foregroundStyle(color)
+            Text(label)
+                .font(.system(size: 10, weight: .semibold))
+                .foregroundStyle(DS.Colors.textSecondary)
         }
     }
 }
