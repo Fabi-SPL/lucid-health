@@ -1808,6 +1808,62 @@ class SupabaseClient {
         }
     }
 
+    // MARK: - Cross-Domain Insights (two-tier: Lucid computed + Gemini speculative)
+
+    /// Rows written by scripts/insight-engine.mjs. Each carries a `source` (lucid|gemini)
+    /// so the Insights tab can badge computed vs AI-generated connections.
+    func fetchCrossDomainInsights() async -> [FoodPattern] {
+        do {
+            try await ensureAuth()
+            guard let token = accessToken else { return [] }
+
+            let fields = "source,title,subtitle,confidence,confidence_value,effect_description,effect_positive,data_quality_note"
+            let url = URL(string: "\(baseURL)/rest/v1/cross_domain_insights?user_id=eq.\(userId)&active=eq.true&select=\(fields)&order=source.asc,confidence_value.desc")!
+            var request = URLRequest(url: url)
+            request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+            request.setValue(anonKey, forHTTPHeaderField: "apikey")
+            request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+
+            let (data, response) = try await session.data(for: request)
+            let statusCode = (response as? HTTPURLResponse)?.statusCode ?? 0
+            guard statusCode == 200,
+                  let rows = try JSONSerialization.jsonObject(with: data) as? [[String: Any]] else {
+                log("Cross-domain insights fetch failed: HTTP \(statusCode)")
+                return []
+            }
+
+            func num(_ row: [String: Any], _ k: String) -> Double? {
+                if let v = row[k] as? Double { return v }
+                if let v = row[k] as? Int { return Double(v) }
+                if let v = row[k] as? NSNumber { return v.doubleValue }
+                return nil
+            }
+            func tier(_ s: String?) -> FoodPattern.ConfidenceTier {
+                switch s { case "high": return .high; case "low": return .low; default: return .medium }
+            }
+
+            let result: [FoodPattern] = rows.compactMap { row in
+                guard let title = row["title"] as? String else { return nil }
+                let src: FoodPattern.Source = (row["source"] as? String) == "gemini" ? .gemini : .lucid
+                return FoodPattern(
+                    title: title,
+                    subtitle: (row["subtitle"] as? String) ?? "",
+                    confidenceTier: tier(row["confidence"] as? String),
+                    confidenceValue: num(row, "confidence_value") ?? 0.5,
+                    effectDescription: row["effect_description"] as? String,
+                    effectPositive: (row["effect_positive"] as? Bool) ?? true,
+                    source: src,
+                    dataQualityNote: row["data_quality_note"] as? String
+                )
+            }
+            log("Cross-domain insights: \(result.count) fetched")
+            return result
+        } catch {
+            log("Cross-domain insights fetch error: \(error.localizedDescription)")
+            return []
+        }
+    }
+
     // MARK: - Debug Log (push to Supabase for remote debugging)
 
     /// Push structured debug event (for sleep staging, smart alarm etc.)
