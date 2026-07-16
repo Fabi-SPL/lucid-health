@@ -32,7 +32,7 @@ struct SettingsView: View {
 
                 staggered(7) { DiscordBroadcastCard() }
                 staggered(8) { HighFrequencyBroadcastCard() }
-                staggered(9) { SpiralAlertsLogCard() }
+                // SpiralAlertsLogCard → Insights (it's an event log, not config).
                 staggered(10) { HueMirrorCard() }
 
                 // ── DIAGNOSTICS ──────────────────────────────────────
