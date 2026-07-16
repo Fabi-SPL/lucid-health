@@ -18,9 +18,6 @@ struct WindDownView: View {
             ? "Lights low, screens away. Let your heart rate settle."
             : bleManager.tonightPlanNote
     }
-    private func fmt(_ mins: Int) -> String {
-        "\(String(format: "%02d", mins / 60)):\(String(format: "%02d", mins % 60))"
-    }
 
     var body: some View {
         ZStack {
@@ -109,23 +106,13 @@ struct WindDownView: View {
                         .foregroundStyle(DS.Colors.amber)
                 }
             }
+            // One server note line — the wake plan itself is drawn on the
+            // night-bar inside SmartWakeControl directly below this card.
             Text(planNote)
                 .font(.system(size: 13))
                 .foregroundStyle(DS.Colors.textSecondary)
                 .lineSpacing(3)
                 .fixedSize(horizontal: false, vertical: true)
-            if bleManager.tonightWindowStart > 0 {
-                HStack(spacing: 6) {
-                    Image(systemName: "alarm")
-                        .font(.system(size: 11, weight: .semibold))
-                        .foregroundStyle(DS.Colors.textMuted)
-                    Text(isAlcohol
-                         ? "No early alarm. Watching from \(fmt(bleManager.tonightWindowStart)), backstop \(fmt(bleManager.tonightWindowEnd))."
-                         : "Wake window \(fmt(bleManager.tonightWindowStart)) to \(fmt(bleManager.tonightWindowEnd)).")
-                        .font(.system(size: 11, weight: .medium))
-                        .foregroundStyle(DS.Colors.textMuted)
-                }
-            }
         }
         .padding(DS.Spacing.md)
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -183,12 +170,26 @@ struct SmartWakeControl: View {
     @State private var deadline: Date =
         Calendar.current.date(bySettingHour: 7, minute: 30, second: 0, of: Date()) ?? Date()
     @State private var busy = false
+    @AppStorage("lucid_backup_nudge_date") private var backupNudgeDate: String = ""
 
     private let accent = DS.Colors.violet
 
     private var armed: Bool { bleManager.smartWakeArmed }
     private var status: SmartWakeStatus? { bleManager.smartWakeStatus }
     private var plan: SmartWakePlan? { bleManager.smartWakePlan }
+
+    private var backupNudgeSeenToday: Bool { backupNudgeDate == Self.dayStamp() }
+    private static func dayStamp() -> String {
+        let f = DateFormatter(); f.dateFormat = "yyyy-MM-dd"
+        return f.string(from: Date())
+    }
+
+    /// Floor in hours-since-onset, derived from live status when the arm-time
+    /// plan isn't in memory (e.g. app relaunched overnight).
+    private var floorFromStatus: Double? {
+        guard let asleep = status?.asleepH, let inMin = status?.earliestInMin else { return nil }
+        return asleep + Double(inMin) / 60.0
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -273,18 +274,34 @@ struct SmartWakeControl: View {
                 }
             }
 
-            // Numbers row — target + floor (tabular).
-            HStack(spacing: 18) {
-                if let t = targetH {
-                    metric(label: "TARGET", value: String(format: "%.1f", t), unit: "h")
-                }
-                if let f = plan?.safetyFloorH {
-                    metric(label: "FLOOR", value: String(format: "%.1f", f), unit: "h")
-                }
-                if let win = status?.projectedWindow {
-                    metric(label: "WINDOW", value: win, unit: "")
-                } else if let inMin = status?.earliestInMin, inMin > 0 {
-                    metric(label: "EARLIEST IN", value: "\(inMin)", unit: "m")
+            // The night, drawn: onset → floor tick → target tick → shaded
+            // window. Replaces the TARGET/FLOOR/WINDOW number cells — the bar
+            // labels ARE the numbers now.
+            if let t = targetH, let f = plan?.safetyFloorH ?? floorFromStatus {
+                NightBar(
+                    targetH: t,
+                    floorH: f,
+                    asleepH: status?.asleepH,
+                    floorLabel: status?.earliestWakeLabel,
+                    targetLabel: status?.targetWakeLabel,
+                    accent: accent
+                )
+            } else if let win = status?.projectedWindow {
+                metric(label: "WINDOW", value: win, unit: "")
+            } else if let inMin = status?.earliestInMin, inMin > 0 {
+                metric(label: "EARLIEST IN", value: "\(inMin)", unit: "m")
+            }
+
+            // Hard-wake row — the guaranteed backstop, the one surviving piece
+            // of the deleted legacy alarm card. Server plan truth, one line.
+            if let backstop = status?.backstopLabel, !backstop.isEmpty {
+                HStack(spacing: 6) {
+                    Image(systemName: "alarm.waves.left.and.right.fill")
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundStyle(DS.Colors.amber)
+                    Text("Hard wake \(backstop) — latest I'll let you sleep.")
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundStyle(DS.Colors.textSecondary)
                 }
             }
 
@@ -306,18 +323,18 @@ struct SmartWakeControl: View {
                         .foregroundStyle(DS.Colors.warning)
                         .fixedSize(horizontal: false, vertical: true)
                 }
-            } else {
-                // Always nudge to keep a backup — the wrist buzz needs the app
-                // alive overnight; a normal alarm is the belt-and-suspenders net.
+            } else if !backupNudgeSeenToday {
+                // Backup nudge — icon + one-liner, shown once per day (the wrist
+                // buzz needs the app alive overnight; a normal alarm is the net).
                 HStack(alignment: .top, spacing: 6) {
                     Image(systemName: "alarm")
                         .font(.system(size: 11))
                         .foregroundStyle(DS.Colors.textMuted)
-                    Text("Keep a normal alarm as a backup — I wake you from your wrist, not the phone speaker.")
+                    Text("Keep a normal alarm as a backup.")
                         .font(.system(size: 11, weight: .medium))
                         .foregroundStyle(DS.Colors.textMuted)
-                        .fixedSize(horizontal: false, vertical: true)
                 }
+                .onAppear { backupNudgeDate = Self.dayStamp() }
             }
 
             Button {
@@ -398,6 +415,101 @@ struct SmartWakeControl: View {
         Task {
             await bleManager.cancelSmartWake()
             await MainActor.run { busy = false }
+        }
+    }
+}
+
+// MARK: - Night Bar (shared: SmartWakeControl on Today + the wind-down takeover)
+
+/// Tonight, drawn as one horizontal bar in hours-since-onset: moon at sleep
+/// onset → shaded projected wake window (floor → target) → floor + target
+/// ticks with the server's clock labels → a "now" dot while asleep.
+/// Pure shapes, display-only — the server owns every number.
+struct NightBar: View {
+    let targetH: Double            // onset-anchored sleep need (bar's right edge)
+    let floorH: Double             // hard "never wake short" floor
+    var asleepH: Double? = nil     // hours asleep so far (nil pre-onset)
+    var floorLabel: String? = nil  // "05:48" — clock label for the floor tick
+    var targetLabel: String? = nil // "07:24" — clock label for the target tick
+    var accent: Color = DS.Colors.violet
+
+    private var domain: Double { max(targetH, floorH, asleepH ?? 0) + 0.4 }
+    private func x(_ h: Double, _ w: CGFloat) -> CGFloat {
+        w * CGFloat(max(0, min(1, h / domain)))
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 5) {
+            GeometryReader { geo in
+                let w = geo.size.width
+                ZStack(alignment: .leading) {
+                    Capsule().fill(DS.Colors.track).frame(height: 8)
+
+                    // Projected wake window — floor → target, shaded.
+                    RoundedRectangle(cornerRadius: 4, style: .continuous)
+                        .fill(LinearGradient(colors: [accent.opacity(0.25), accent.opacity(0.55)],
+                                             startPoint: .leading, endPoint: .trailing))
+                        .frame(width: max(6, x(targetH, w) - x(floorH, w)), height: 8)
+                        .offset(x: x(floorH, w))
+
+                    // Onset moon
+                    Image(systemName: "moon.fill")
+                        .font(.system(size: 9, weight: .bold))
+                        .foregroundStyle(DS.Colors.textMuted)
+                        .offset(x: -2, y: -14)
+
+                    // Floor tick
+                    tick(at: x(floorH, w), color: DS.Colors.amber)
+                    // Target tick
+                    tick(at: x(targetH, w), color: accent)
+
+                    // Now dot — only while asleep
+                    if let now = asleepH, now > 0 {
+                        Circle()
+                            .fill(DS.Colors.teal)
+                            .frame(width: 9, height: 9)
+                            .offset(x: max(0, x(now, w) - 4.5))
+                            .shadow(color: DS.Colors.teal.opacity(0.6), radius: 4)
+                    }
+                }
+                .frame(maxHeight: .infinity)
+            }
+            .frame(height: 26)
+            .padding(.top, 12)
+
+            // Labels row — the ticks, named. Clock labels when the server has
+            // them (post-onset), sleep-need hours otherwise.
+            HStack {
+                barLabel("FLOOR", floorLabel ?? String(format: "%.1fh", floorH), DS.Colors.amber)
+                Spacer()
+                if let now = asleepH, now > 0 {
+                    barLabel("ASLEEP", String(format: "%.1fh", now), DS.Colors.teal)
+                    Spacer()
+                }
+                barLabel("TARGET", targetLabel ?? String(format: "%.1fh", targetH), accent)
+            }
+        }
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("Wake window from \(floorLabel ?? String(format: "%.1f hours", floorH)) to \(targetLabel ?? String(format: "%.1f hours", targetH)) of sleep")
+    }
+
+    private func tick(at xPos: CGFloat, color: Color) -> some View {
+        RoundedRectangle(cornerRadius: 1, style: .continuous)
+            .fill(color)
+            .frame(width: 3, height: 16)
+            .offset(x: max(0, xPos - 1.5))
+    }
+
+    private func barLabel(_ label: String, _ value: String, _ color: Color) -> some View {
+        HStack(spacing: 4) {
+            Text(label)
+                .font(.system(size: 8, weight: .bold))
+                .tracking(0.7)
+                .foregroundStyle(DS.Colors.textMuted)
+            Text(value)
+                .font(.system(size: 11, weight: .bold, design: .rounded))
+                .monospacedDigit()
+                .foregroundStyle(color)
         }
     }
 }

@@ -510,13 +510,15 @@ struct RecoveryTrendStrip: View {
 struct AlcoholNightChip: View {
     var body: some View {
         HStack(spacing: 8) {
-            Text("🍺")
+            Text("🍷")
                 .font(.system(size: 14))
             Text("Alcohol night detected")
                 .font(.system(size: 12, weight: .semibold, design: .rounded))
                 .foregroundStyle(DS.Colors.textSecondary)
             Spacer()
-            Text("Score is honest")
+            // Best copy from the two merged alcohol voices (v106 chip + the
+            // old wine PatternNote): it's the wine, not you.
+            Text("The wine, not you")
                 .font(.system(size: 11, weight: .medium, design: .rounded))
                 .foregroundStyle(DS.Colors.textMuted)
         }
@@ -531,6 +533,6 @@ struct AlcoholNightChip: View {
                 .strokeBorder(DS.Colors.textFaint.opacity(0.18), lineWidth: 0.5)
         )
         .accessibilityElement(children: .combine)
-        .accessibilityLabel("Alcohol night detected. Score is honest.")
+        .accessibilityLabel("Alcohol night detected. The low score is the wine, not you.")
     }
 }
