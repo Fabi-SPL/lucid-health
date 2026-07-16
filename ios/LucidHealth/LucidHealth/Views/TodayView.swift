@@ -34,6 +34,9 @@ struct TodayView: View {
     @StateObject private var modeStore = AppModeStore()
     @State private var activityDraft: String = ""
     @State private var showWindDown = false
+    @State private var showCoherenceDrill = false
+    @State private var lastNight: SleepRestlessness? = nil
+    @State private var illness: IllnessRisk? = nil
 
     // Shared glass sampling namespace — lets GlassEffectContainer treat
     // sibling glass surfaces as one continuous material per LiquidGlassReference.
@@ -174,6 +177,9 @@ struct TodayView: View {
             recoveryTrend = await bleManager.supabase.fetchRecoveryTrend()
             await bleManager.syncTonightPlan()
             maybeShowWindDown(modeStore.current)
+            // Morning cluster data — non-gating, loads after the fold.
+            lastNight = await SupabaseClient.shared.fetchSleepRestlessness()
+            illness = await SupabaseClient.shared.fetchIllnessRisk()
         }
         .onDisappear { modeStore.stop() }
         // Wind-down page comes up once per night when the mode flips to wind-down.
@@ -364,6 +370,15 @@ struct TodayView: View {
                         .opacity(appeared ? 1 : 0)
                         .animation(DS.Anim.cardAppear, value: appeared)
                         .scrollSectionTransition()
+
+                    // Last-night signals (restlessness + illness) — a morning status
+                    // readout, so it lives here with WakeBloom, not on Insights.
+                    LastNightCard(sleep: lastNight, illness: illness)
+                        .padding(.horizontal, DS.Spacing.md)
+                        .padding(.top, DS.Spacing.md)
+                        .opacity(appeared ? 1 : 0)
+                        .animation(DS.Anim.cardAppear, value: appeared)
+                        .scrollSectionTransition()
                 }
 
                 activityComposerSection
@@ -371,6 +386,22 @@ struct TodayView: View {
                     .opacity(appeared ? 1 : 0)
                     .offset(y: appeared ? 0 : 20)
                     .animation(DS.Anim.stagger(index: 3), value: appeared)
+                    .scrollSectionTransition()
+
+                // Coherence drill launcher — a tool for NOW, so it sits in the
+                // action zone next to the composer (moved off Insights).
+                // Cover attaches HERE, not on the root — TodayView's root already
+                // carries 2 covers and SwiftUI silently drops a 3rd sibling.
+                CoherenceDrillTile(action: { showCoherenceDrill = true })
+                    .fullScreenCover(isPresented: $showCoherenceDrill) {
+                        CoherenceDrillView()
+                            .environmentObject(bleManager)
+                    }
+                    .padding(.horizontal, DS.Spacing.md)
+                    .padding(.top, DS.Spacing.md)
+                    .opacity(appeared ? 1 : 0)
+                    .offset(y: appeared ? 0 : 20)
+                    .animation(DS.Anim.stagger(index: 4), value: appeared)
                     .scrollSectionTransition()
 
                 // Last meal, food-stats bento + fasting moved to the Food tab
@@ -1817,5 +1848,118 @@ private struct SmartAlarmCard: View {
             firstDelaySec: 8.0,
             idPrefix: "lucid_smart_alarm_test"
         )
+    }
+}
+
+// MARK: - Coherence Drill launcher (moved from Insights — it's a tool, not a pattern)
+
+private struct CoherenceDrillTile: View {
+    let action: () -> Void
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: DS.Spacing.md) {
+                ZStack {
+                    Circle()
+                        .fill(LinearGradient(
+                            colors: [DS.Colors.violet, DS.Colors.teal],
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
+                        ))
+                        .frame(width: 44, height: 44)
+                    Image(systemName: "wind")
+                        .font(.system(size: 20, weight: .semibold))
+                        .foregroundStyle(.white)
+                }
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Coherence Drill")
+                        .font(.system(size: 15, weight: .bold, design: .rounded))
+                        .foregroundStyle(DS.Colors.textPrimary)
+                    Text("5-min HRV biofeedback · 6 breaths/min")
+                        .font(.system(size: 11, design: .rounded))
+                        .foregroundStyle(DS.Colors.textMuted)
+                }
+                Spacer()
+                Image(systemName: "play.circle.fill")
+                    .font(.system(size: 28))
+                    .foregroundStyle(DS.Colors.violet)
+            }
+            .padding(DS.Spacing.md)
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .glassDefault()
+        .pressableCard()
+    }
+}
+
+// MARK: - Last Night Card (moved from Insights — a morning status readout)
+
+private struct LastNightCard: View {
+    let sleep: SleepRestlessness?
+    let illness: IllnessRisk?
+
+    var body: some View {
+        if let s = sleep {
+            VStack(alignment: .leading, spacing: DS.Spacing.sm) {
+                HStack {
+                    Text("LAST NIGHT")
+                        .font(DS.Font.label)
+                        .foregroundStyle(DS.Colors.textMuted)
+                        .tracking(0.8)
+                    Spacer()
+                    Text(String(format: "%.1fh in bed", s.inBedH))
+                        .font(.system(size: 11, weight: .medium))
+                        .foregroundStyle(DS.Colors.textFaint)
+                        .monospacedDigit()
+                }
+                HStack(spacing: DS.Spacing.md) {
+                    metric(value: "\(s.stability)/10", label: "stability", color: stabilityColor(s.stability))
+                    metric(value: "\(s.restlessMin)m", label: "restless", color: DS.Colors.textSecondary)
+                    metric(value: "\(s.wakeups)", label: "wake-ups", color: DS.Colors.textSecondary)
+                    metric(value: "\(s.sleepingHr)", label: "sleep HR", color: DS.Colors.teal)
+                }
+                if let ill = illness, ill.isSignal {
+                    HStack(alignment: .top, spacing: 6) {
+                        Circle()
+                            .fill(illnessColor(ill.level))
+                            .frame(width: 7, height: 7)
+                            .padding(.top, 4)
+                        Text(ill.note)
+                            .font(.system(size: 11, weight: .regular))
+                            .foregroundStyle(DS.Colors.textSecondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                    .padding(.top, 2)
+                }
+            }
+            .padding(DS.Spacing.md)
+            .glassDefault()
+        }
+    }
+
+    private func metric(value: String, label: String, color: Color) -> some View {
+        VStack(spacing: 2) {
+            Text(value)
+                .font(.system(size: 16, weight: .bold, design: .rounded))
+                .foregroundStyle(color)
+                .monospacedDigit()
+            Text(label)
+                .font(.system(size: 9, weight: .medium))
+                .foregroundStyle(DS.Colors.textFaint)
+        }
+        .frame(maxWidth: .infinity)
+    }
+
+    private func stabilityColor(_ s: Int) -> Color {
+        if s >= 7 { return DS.Colors.teal }
+        if s >= 4 { return DS.Colors.amber }
+        return DS.Colors.danger
+    }
+
+    private func illnessColor(_ level: String) -> Color {
+        switch level {
+        case "elevated": return DS.Colors.danger
+        case "watch":    return DS.Colors.amber
+        default:         return DS.Colors.teal
+        }
     }
 }

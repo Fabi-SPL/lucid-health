@@ -16,6 +16,12 @@ struct DailyInsightsStrip: View {
     @State private var insights: [ExperimentalFeaturesService.DailyInsight] = []
     @State private var expanded: Set<String> = []
     @State private var isLoaded = false
+    @State private var showAll = false
+
+    private static let visibleCap = 5
+    private var visible: [ExperimentalFeaturesService.DailyInsight] {
+        showAll ? insights : Array(insights.prefix(Self.visibleCap))
+    }
 
     var body: some View {
         Group {
@@ -42,10 +48,10 @@ struct DailyInsightsStrip: View {
                 Image(systemName: "sparkles")
                     .font(.system(size: 11, weight: .semibold))
                     .foregroundStyle(DS.Colors.violet)
-                Text("DAILY INSIGHTS")
-                    .font(.system(size: 9, weight: .bold))
-                    .foregroundStyle(DS.Colors.textFaint)
-                    .tracking(0.8)
+                Text("DISCOVERIES")
+                    .font(.system(size: 10, weight: .bold))
+                    .foregroundStyle(DS.Colors.textMuted)
+                    .tracking(1.4)
                 Spacer()
                 Text(insights.first.map { dateLabel(for: $0.generated_for_date) } ?? "")
                     .font(.system(size: 10, design: .rounded))
@@ -53,13 +59,26 @@ struct DailyInsightsStrip: View {
                     .monospacedDigit()
             }
             VStack(spacing: 8) {
-                ForEach(insights) { insight in
+                ForEach(visible) { insight in
                     DailyInsightRow(
                         insight: insight,
                         isExpanded: expanded.contains(insight.id),
                         onTap: { toggle(insight.id) }
                     )
                 }
+            }
+            if insights.count > Self.visibleCap {
+                Button {
+                    DS.Haptic.tap()
+                    withAnimation(DS.Anim.quick) { showAll.toggle() }
+                } label: {
+                    Text(showAll ? "Show less" : "Show all (\(insights.count))")
+                        .font(.system(size: 12, weight: .semibold, design: .rounded))
+                        .foregroundStyle(DS.Colors.violet)
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 8)
+                }
+                .buttonStyle(.plain)
             }
         }
         .padding(.horizontal, DS.Spacing.md)

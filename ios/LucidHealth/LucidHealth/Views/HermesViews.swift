@@ -184,6 +184,14 @@ struct HermesCard: View {
         return "\(secs / 86400)d ago"
     }
 
+    /// Freshness gate — while the server's /now compute is dead (no snapshot in
+    /// 36h+), hide the refresh control instead of shipping a button that 500s.
+    private var computeIsLive: Bool {
+        guard let iso = snapshot?.computed_at,
+              let date = ISO8601DateFormatter.lucid.date(from: iso) else { return false }
+        return Date().timeIntervalSince(date) < 36 * 3600
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: DS.Spacing.sm) {
             // Header row
@@ -213,17 +221,19 @@ struct HermesCard: View {
                         .clipShape(Circle())
                 }
                 .buttonStyle(.plain)
-                Button(action: { DS.Haptic.tap(); Task { await refresh() } }) {
-                    Image(systemName: isLoading ? "ellipsis" : "arrow.clockwise")
-                        .font(.system(size: 12, weight: .bold))
-                        .foregroundStyle(DS.Colors.textSecondary)
-                        .symbolEffect(.pulse, options: .repeating, isActive: isLoading)
-                        .frame(width: 28, height: 28)
-                        .background(DS.Colors.surfaceElevated)
-                        .clipShape(Circle())
+                if computeIsLive {
+                    Button(action: { DS.Haptic.tap(); Task { await refresh() } }) {
+                        Image(systemName: isLoading ? "ellipsis" : "arrow.clockwise")
+                            .font(.system(size: 12, weight: .bold))
+                            .foregroundStyle(DS.Colors.textSecondary)
+                            .symbolEffect(.pulse, options: .repeating, isActive: isLoading)
+                            .frame(width: 28, height: 28)
+                            .background(DS.Colors.surfaceElevated)
+                            .clipShape(Circle())
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(isLoading)
                 }
-                .buttonStyle(.plain)
-                .disabled(isLoading)
             }
 
             // Interpretation — always show the last good reading (or placeholder).
@@ -240,6 +250,11 @@ struct HermesCard: View {
                     Text(err)
                         .font(.system(size: 11.5, weight: .medium, design: .rounded))
                         .foregroundStyle(DS.Colors.amber)
+                        .lineLimit(2)
+                } else if snapshot != nil && !computeIsLive {
+                    Text("Live readings are paused — this is my last full read.")
+                        .font(.system(size: 11.5, weight: .medium, design: .rounded))
+                        .foregroundStyle(DS.Colors.amber.opacity(0.85))
                         .lineLimit(2)
                 }
             }
@@ -280,12 +295,11 @@ struct HermesCard: View {
             appeared = true
             if snapshot == nil {
                 Task {
-                    // Cheap cached read first — don't fire the heavy /now recompute on
-                    // every mount. Manual refresh still hits /now.
+                    // Cheap cached read only — never auto-fire the heavy /now
+                    // recompute on mount (it's been dead server-side; manual
+                    // refresh appears only when the snapshot is fresh).
                     if let cached = await HermesAPI.fetchCached(supabase: bleManager.supabase) {
                         await MainActor.run { snapshot = cached }
-                    } else {
-                        await refresh()
                     }
                 }
             }

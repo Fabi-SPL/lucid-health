@@ -34,12 +34,6 @@ struct HealthView: View {
                     recoveryBreakdownSection
                         .staggerIn(appeared: appeared, index: 1)
 
-                    // Hermes — body-state interpreter + chat (moved off Today to keep
-                    // Today glanceable; this is the exploration surface).
-                    HermesCard()
-                        .padding(.horizontal, DS.Spacing.md)
-                        .staggerIn(appeared: appeared, index: 2)
-
                     // FORMAT: CHART — HRV trend sparkline (RMSSD headline only)
                     hrvTrendSection
                         .staggerIn(appeared: appeared, index: 2)

@@ -1,9 +1,11 @@
 import SwiftUI
 
 // MARK: - InsightsView
-// Principle #11: format diversity — CHIPS (filter) → BENTO (stats) → CARDS (insights) → NOTE (alcohol)
-// Principle #5: CategoryDot on AlcoholImpactCard (amber)
-// Default filter: .medium (Emerging) — most actionable tier
+// 2026-07 redesign: "what patterns move my body, shown as evidence."
+// Every claim is carried by a chart; prose is caption-length only.
+// Page order: featured discovery → effect bars → evidence scatter → recovery
+// heatmap → discoveries feed → spiral alerts → Hermes (freshness-gated) →
+// data gate → Labs row. Tool launchers and status readouts moved to Today.
 
 struct InsightsView: View {
     @EnvironmentObject private var bleManager: BLEManager
@@ -11,21 +13,16 @@ struct InsightsView: View {
     @State private var isLoading = false
     @State private var entryCount = 0
     @State private var appeared = false
-    @State private var confidenceFilter: FoodPattern.ConfidenceTier? = nil  // All — show strongest real patterns first
-    @State private var showCoherenceDrill = false
     @State private var showBiostate = false
     @State private var biostateInitialCorrect: BiostateDetector? = nil
-    @State private var lastNight: SleepRestlessness? = nil
-    @State private var illness: IllnessRisk? = nil
     @State private var dailyMetrics: [DailyMetric] = []
     @State private var crossDomain: [FoodPattern] = []
 
     private static let minimumEntries = 14
 
-    private var filtered: [FoodPattern] {
-        guard let filter = confidenceFilter else { return patterns }
-        return patterns.filter { $0.confidenceTier == filter }
-    }
+    /// Featured = strongest pattern; the feed shows the rest.
+    private var featured: FoodPattern? { patterns.first }
+    private var remaining: [FoodPattern] { Array(patterns.dropFirst()) }
 
     var body: some View {
         ZStack {
@@ -33,136 +30,113 @@ struct InsightsView: View {
                 LazyVStack(spacing: DS.Spacing.md) {
                     headerSpacer
 
-                    // Coherence Drill quick-launch (always visible, not gated)
-                    CoherenceDrillTile(action: { showCoherenceDrill = true })
-                        .padding(.horizontal, DS.Spacing.md)
-                        .offset(y: appeared ? 0 : 20)
-                        .opacity(appeared ? 1 : 0)
-                        .animation(DS.Anim.stagger(index: 0), value: appeared)
-
-                    // Daily insights from the Claude routine + Vercel cron fallback
-                    DailyInsightsStrip()
-                        .offset(y: appeared ? 0 : 20)
-                        .opacity(appeared ? 1 : 0)
-                        .animation(DS.Anim.stagger(index: 1), value: appeared)
-
-                    // Last-night signals (sleep restlessness + illness early-warning)
-                    LastNightCard(sleep: lastNight, illness: illness)
-                        .padding(.horizontal, DS.Spacing.md)
-                        .offset(y: appeared ? 0 : 20)
-                        .opacity(appeared ? 1 : 0)
-                        .animation(DS.Anim.stagger(index: 2), value: appeared)
-
                     if isLoading {
                         LoadingState(label: "Analyzing patterns…")
                     } else {
-                        // Slim nudge when food logging is thin — but real health
-                        // correlations (HRV/RHR/sleep → recovery) still render below.
-                        if entryCount < Self.minimumEntries {
-                            DataGateCard(entriesLogged: entryCount, required: Self.minimumEntries)
-                                .statusGlow(DS.Colors.violet, intensity: 0.6)
+                        // 1 — Featured discovery: the screen's ONE accent card.
+                        if let top = featured {
+                            FeaturedDiscoveryCard(pattern: top)
                                 .padding(.horizontal, DS.Spacing.md)
                                 .offset(y: appeared ? 0 : 20)
                                 .opacity(appeared ? 1 : 0)
                                 .animation(DS.Anim.stagger(index: 0), value: appeared)
                         }
 
-                        // Confidence filter chips
-                        ConfidenceFilterRow(selected: $confidenceFilter)
-                            .offset(y: appeared ? 0 : 20)
-                            .opacity(appeared ? 1 : 0)
-                            .animation(DS.Anim.stagger(index: 0), value: appeared)
-
-                        // Stats summary
-                        PatternStatsBanner(patterns: patterns, entryCount: entryCount)
-                            .padding(.horizontal, DS.Spacing.md)
-                            .offset(y: appeared ? 0 : 20)
-                            .opacity(appeared ? 1 : 0)
-                            .animation(DS.Anim.stagger(index: 1), value: appeared)
-
-                        // Cross-domain connections (Lucid computed + Gemini speculative) — the new engine
-                        if !crossDomain.isEmpty {
-                            CrossDomainHeader()
-                                .padding(.horizontal, DS.Spacing.md)
-                                .offset(y: appeared ? 0 : 20)
-                                .opacity(appeared ? 1 : 0)
-                                .animation(DS.Anim.stagger(index: 2), value: appeared)
-                            ForEach(Array(crossDomain.enumerated()), id: \.element.id) { i, p in
-                                InsightCard(pattern: p)
-                                    .padding(.horizontal, DS.Spacing.md)
-                                    .offset(y: appeared ? 0 : 20)
-                                    .opacity(appeared ? 1 : 0)
-                                    .animation(DS.Anim.stagger(index: i + 3), value: appeared)
-                            }
-                        }
-
-                        // Featured pattern hero + diverging impact bars (v6 mockup)
-                        if let top = patterns.max(by: { $0.confidenceValue < $1.confidenceValue }) {
-                            FeaturedPatternCard(pattern: top)
-                                .padding(.horizontal, DS.Spacing.md)
-                                .offset(y: appeared ? 0 : 20)
-                                .opacity(appeared ? 1 : 0)
-                                .animation(DS.Anim.stagger(index: 1), value: appeared)
-                        }
+                        // 2 — What moves your body: diverging effect-magnitude bars.
                         if patterns.count >= 3 {
                             PatternImpactBars(patterns: patterns)
                                 .padding(.horizontal, DS.Spacing.md)
                                 .offset(y: appeared ? 0 : 20)
                                 .opacity(appeared ? 1 : 0)
-                                .animation(DS.Anim.stagger(index: 2), value: appeared)
+                                .animation(DS.Anim.stagger(index: 1), value: appeared)
                         }
 
-                        // Sleep↔recovery scatter + recovery heatmap (v6 mockup)
+                        // 3 — Evidence scatter (sleep ↔ recovery).
                         if dailyMetrics.filter({ $0.recovery != nil && ($0.sleepHours ?? 0) > 0 }).count >= 4 {
                             SleepRecoveryScatter(metrics: dailyMetrics)
                                 .padding(.horizontal, DS.Spacing.md)
                                 .offset(y: appeared ? 0 : 20)
                                 .opacity(appeared ? 1 : 0)
-                                .animation(DS.Anim.stagger(index: 3), value: appeared)
+                                .animation(DS.Anim.stagger(index: 2), value: appeared)
                         }
+
+                        // 4 — Recovery heatmap (5 weeks).
                         if dailyMetrics.contains(where: { $0.recovery != nil }) {
                             RecoveryHeatmap(metrics: dailyMetrics)
                                 .padding(.horizontal, DS.Spacing.md)
                                 .offset(y: appeared ? 0 : 20)
                                 .opacity(appeared ? 1 : 0)
-                                .animation(DS.Anim.stagger(index: 4), value: appeared)
+                                .animation(DS.Anim.stagger(index: 3), value: appeared)
                         }
 
-                        // Pattern cards
-                        ForEach(Array(filtered.enumerated()), id: \.element.id) { i, pattern in
-                            InsightCard(pattern: pattern)
-                                .padding(.horizontal, DS.Spacing.md)
-                                .offset(y: appeared ? 0 : 20)
-                                .opacity(appeared ? 1 : 0)
-                                .animation(DS.Anim.stagger(index: i + 2), value: appeared)
+                        // 5 — Discoveries feed: nightly AI insights, capped w/ show-all.
+                        DailyInsightsStrip()
+                            .offset(y: appeared ? 0 : 20)
+                            .opacity(appeared ? 1 : 0)
+                            .animation(DS.Anim.stagger(index: 4), value: appeared)
+
+                        // 5b — Cross-domain connections (Lucid computed + Gemini).
+                        if !crossDomain.isEmpty {
+                            sectionLabel("ACROSS DOMAINS")
+                            ForEach(Array(crossDomain.enumerated()), id: \.element.id) { i, p in
+                                InsightCard(pattern: p)
+                                    .padding(.horizontal, DS.Spacing.md)
+                                    .offset(y: appeared ? 0 : 20)
+                                    .opacity(appeared ? 1 : 0)
+                                    .animation(DS.Anim.stagger(index: min(i + 5, 9)), value: appeared)
+                            }
                         }
 
-                        if filtered.isEmpty {
+                        // 5c — Remaining computed patterns.
+                        if !remaining.isEmpty {
+                            sectionLabel("YOUR PATTERNS")
+                            ForEach(Array(remaining.enumerated()), id: \.element.id) { i, pattern in
+                                InsightCard(pattern: pattern)
+                                    .padding(.horizontal, DS.Spacing.md)
+                                    .offset(y: appeared ? 0 : 20)
+                                    .opacity(appeared ? 1 : 0)
+                                    .animation(DS.Anim.stagger(index: min(i + 6, 9)), value: appeared)
+                            }
+                        }
+
+                        if patterns.isEmpty && crossDomain.isEmpty {
                             EmptyGlassState(
                                 icon: "lightbulb",
-                                title: "No pattern found",
-                                detail: confidenceFilter != nil
-                                    ? "Try a different confidence tier."
-                                    : "Analysis improves with more data."
+                                title: "No pattern found yet",
+                                detail: "Analysis improves as more days accumulate."
                             )
                             .padding(.horizontal, DS.Spacing.md)
                         }
 
-                        // Alcohol impact (always show if significant)
-                        if bleManager.healthEngine.lastAlcoholImpact > 10 {
-                            AlcoholImpactCard(impact: bleManager.healthEngine.lastAlcoholImpact)
-                                .padding(.horizontal, DS.Spacing.md)
-                                .offset(y: appeared ? 0 : 20)
-                                .opacity(appeared ? 1 : 0)
-                                .animation(DS.Anim.stagger(index: filtered.count + 3), value: appeared)
-                        }
-
-                        // Methodology note
-                        MethodologyNote(entryCount: entryCount)
+                        // 6 — Spiral alerts (event log — moved in from Settings Labs).
+                        SpiralAlertsLogCard()
                             .padding(.horizontal, DS.Spacing.md)
                             .offset(y: appeared ? 0 : 20)
                             .opacity(appeared ? 1 : 0)
-                            .animation(DS.Anim.stagger(index: filtered.count + 4), value: appeared)
+                            .animation(DS.Anim.stagger(index: 7), value: appeared)
+
+                        // 7 — Hermes: interpretation surface (freshness-gated inside).
+                        HermesCard()
+                            .padding(.horizontal, DS.Spacing.md)
+                            .offset(y: appeared ? 0 : 20)
+                            .opacity(appeared ? 1 : 0)
+                            .animation(DS.Anim.stagger(index: 8), value: appeared)
+
+                        // 8 — Data gate: only while food logging is thin.
+                        if entryCount < Self.minimumEntries {
+                            DataGateCard(entriesLogged: entryCount, required: Self.minimumEntries)
+                                .padding(.horizontal, DS.Spacing.md)
+                                .offset(y: appeared ? 0 : 20)
+                                .opacity(appeared ? 1 : 0)
+                                .animation(DS.Anim.stagger(index: 9), value: appeared)
+                        }
+
+                        // 9 — Labs: the experimental biostate surface, finally labeled.
+                        LabsBiostateRow { showBiostate = true }
+                            .padding(.horizontal, DS.Spacing.md)
+                            .offset(y: appeared ? 0 : 20)
+                            .opacity(appeared ? 1 : 0)
+                            .animation(DS.Anim.stagger(index: 9), value: appeared)
                     }
 
                     bottomSpacer
@@ -174,16 +148,6 @@ struct InsightsView: View {
             ToolbarItem(placement: .principal) {
                 TwoToneHeadline(primary: "Insights", secondary: " · Patterns", font: .system(size: 17, weight: .bold, design: .rounded))
             }
-            ToolbarItem(placement: .navigationBarLeading) {
-                Button {
-                    DS.Haptic.tap()
-                    showBiostate = true
-                } label: {
-                    Image(systemName: "waveform.path.ecg")
-                        .font(.system(size: 16, weight: .semibold))
-                        .foregroundStyle(DS.Colors.violet)
-                }
-            }
             ToolbarItem(placement: .navigationBarTrailing) {
                 SettingsGearButton()
             }
@@ -192,10 +156,7 @@ struct InsightsView: View {
             await loadInsights()
             withAnimation { appeared = true }
         }
-        .fullScreenCover(isPresented: $showCoherenceDrill) {
-            CoherenceDrillView()
-                .environmentObject(bleManager)
-        }
+        .refreshable { await loadInsights() }
         .fullScreenCover(isPresented: $showBiostate) {
             BiostateDashboardView(initialCorrect: biostateInitialCorrect)
         }
@@ -205,51 +166,21 @@ struct InsightsView: View {
         }
     }
 
-    // MARK: - Coherence Drill quick-launch tile
-
-    private struct CoherenceDrillTile: View {
-        let action: () -> Void
-        var body: some View {
-            Button(action: action) {
-                HStack(spacing: DS.Spacing.md) {
-                    ZStack {
-                        Circle()
-                            .fill(LinearGradient(
-                                colors: [DS.Colors.violet, DS.Colors.teal],
-                                startPoint: .topLeading,
-                                endPoint: .bottomTrailing
-                            ))
-                            .frame(width: 44, height: 44)
-                        Image(systemName: "wind")
-                            .font(.system(size: 20, weight: .semibold))
-                            .foregroundStyle(.white)
-                    }
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text("Coherence Drill")
-                            .font(.system(size: 15, weight: .bold, design: .rounded))
-                            .foregroundStyle(DS.Colors.textPrimary)
-                        Text("5-min HRV biofeedback · 6 breaths/min")
-                            .font(.system(size: 11, design: .rounded))
-                            .foregroundStyle(DS.Colors.textMuted)
-                    }
-                    Spacer()
-                    Image(systemName: "play.circle.fill")
-                        .font(.system(size: 28))
-                        .foregroundStyle(DS.Colors.violet)
-                }
-                .padding(DS.Spacing.md)
-                .frame(maxWidth: .infinity, alignment: .leading)
-            }
-            .glassDefault()
-            .pressableCard()
-        }
+    private func sectionLabel(_ text: String) -> some View {
+        Text(text)
+            .font(.system(size: 10, weight: .bold))
+            .tracking(1.4)
+            .foregroundStyle(DS.Colors.textMuted)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal, DS.Spacing.md + 4)
+            .padding(.top, DS.Spacing.sm)
     }
 
     private var headerSpacer: some View { Color.clear.frame(height: DS.Spacing.sm) }
     private var bottomSpacer: some View { Color.clear.frame(height: 100) }
 
     private func loadInsights() async {
-        isLoading = true
+        isLoading = patterns.isEmpty   // refreshes stay non-destructive
         // Health-metric correlations don't need food data — fetch both, always compute.
         let metrics = await SupabaseClient.shared.fetchDailyMetrics(days: 120)
         dailyMetrics = metrics
@@ -259,192 +190,45 @@ struct InsightsView: View {
         patterns = InsightEngine.compute(entries: entries, metrics: metrics)
         crossDomain = await SupabaseClient.shared.fetchCrossDomainInsights()
         isLoading = false
-        // Last-night signals load independently (don't gate the patterns view on them).
-        lastNight = await SupabaseClient.shared.fetchSleepRestlessness()
-        illness = await SupabaseClient.shared.fetchIllnessRisk()
     }
 }
 
-// MARK: - Last Night Card (sleep restlessness + illness early-warning)
+// MARK: - Labs · Biostate row (labeled entry to the experimental surface)
 
-private struct LastNightCard: View {
-    let sleep: SleepRestlessness?
-    let illness: IllnessRisk?
+private struct LabsBiostateRow: View {
+    let action: () -> Void
 
     var body: some View {
-        if let s = sleep {
-            VStack(alignment: .leading, spacing: DS.Spacing.sm) {
-                HStack {
-                    Text("LAST NIGHT")
-                        .font(DS.Font.label)
+        Button {
+            DS.Haptic.tap()
+            action()
+        } label: {
+            HStack(spacing: DS.Spacing.md) {
+                Image(systemName: "waveform.path.ecg")
+                    .font(.system(size: 16, weight: .semibold))
+                    .foregroundStyle(DS.Colors.violet)
+                    .frame(width: 32, height: 32)
+                    .background(Circle().fill(DS.Colors.violet.opacity(0.12)))
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Labs · Biostate")
+                        .font(.system(size: 14, weight: .bold, design: .rounded))
+                        .foregroundStyle(DS.Colors.textPrimary)
+                    Text("Experimental detectors — read loosely")
+                        .font(.system(size: 11, design: .rounded))
                         .foregroundStyle(DS.Colors.textMuted)
-                        .tracking(0.8)
-                    Spacer()
-                    Text(String(format: "%.1fh in bed", s.inBedH))
-                        .font(.system(size: 11, weight: .medium))
-                        .foregroundStyle(DS.Colors.textFaint)
-                        .monospacedDigit()
                 }
-                HStack(spacing: DS.Spacing.md) {
-                    metric(value: "\(s.stability)/10", label: "stability", color: stabilityColor(s.stability))
-                    metric(value: "\(s.restlessMin)m", label: "restless", color: DS.Colors.textSecondary)
-                    metric(value: "\(s.wakeups)", label: "wake-ups", color: DS.Colors.textSecondary)
-                    metric(value: "\(s.sleepingHr)", label: "sleep HR", color: DS.Colors.teal)
-                }
-                if let ill = illness, ill.isSignal {
-                    HStack(alignment: .top, spacing: 6) {
-                        Circle()
-                            .fill(illnessColor(ill.level))
-                            .frame(width: 7, height: 7)
-                            .padding(.top, 4)
-                        Text(ill.note)
-                            .font(.system(size: 11, weight: .regular))
-                            .foregroundStyle(DS.Colors.textSecondary)
-                            .fixedSize(horizontal: false, vertical: true)
-                    }
-                    .padding(.top, 2)
-                }
+                Spacer()
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(DS.Colors.textFaint)
             }
             .padding(DS.Spacing.md)
-            .glassDefault()
-        }
-    }
-
-    private func metric(value: String, label: String, color: Color) -> some View {
-        VStack(spacing: 2) {
-            Text(value)
-                .font(.system(size: 16, weight: .bold, design: .rounded))
-                .foregroundStyle(color)
-                .monospacedDigit()
-            Text(label)
-                .font(.system(size: 9, weight: .medium))
-                .foregroundStyle(DS.Colors.textFaint)
-        }
-        .frame(maxWidth: .infinity)
-    }
-
-    private func stabilityColor(_ s: Int) -> Color {
-        if s >= 7 { return DS.Colors.teal }
-        if s >= 4 { return DS.Colors.amber }
-        return DS.Colors.danger
-    }
-
-    private func illnessColor(_ level: String) -> Color {
-        switch level {
-        case "elevated": return DS.Colors.danger
-        case "watch":    return DS.Colors.amber
-        default:         return DS.Colors.teal
-        }
-    }
-}
-
-// MARK: - Cross-Domain Header (legend: Lucid computed vs Gemini AI)
-
-private struct CrossDomainHeader: View {
-    var body: some View {
-        VStack(alignment: .leading, spacing: 7) {
-            TwoToneHeadline(
-                primary: "Cross-domain",
-                secondary: " · what connects",
-                font: .system(size: 15, weight: .bold, design: .rounded)
-            )
-            Text("Connections across food, movement, PC, and health.")
-                .font(.system(size: 11, weight: .regular))
-                .foregroundStyle(DS.Colors.textSecondary)
-            HStack(spacing: 12) {
-                legend(icon: "diamond.fill", label: "Lucid · computed", color: DS.Colors.teal)
-                legend(icon: "sparkles", label: "Gemini · AI guess", color: DS.Colors.violet)
-            }
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(DS.Spacing.md)
-        .glassDefault()
-    }
-
-    private func legend(icon: String, label: String, color: Color) -> some View {
-        HStack(spacing: 4) {
-            Image(systemName: icon)
-                .font(.system(size: 9, weight: .bold))
-                .foregroundStyle(color)
-            Text(label)
-                .font(.system(size: 10, weight: .semibold))
-                .foregroundStyle(DS.Colors.textSecondary)
-        }
-    }
-}
-
-// MARK: - Confidence Filter Row
-
-private extension FoodPattern.ConfidenceTier {
-    var filterLabel: String {
-        switch self {
-        case .high:   return "Established"
-        case .medium: return "Emerging"
-        case .low:    return "Possible"
-        }
-    }
-
-    var filterColor: Color {
-        switch self {
-        case .high:   return DS.Colors.teal
-        case .medium: return DS.Colors.amber
-        case .low:    return DS.Colors.violet
-        }
-    }
-
-    var filterIndex: Int {
-        switch self {
-        case .high:   return 0
-        case .medium: return 1
-        case .low:    return 2
-        }
-    }
-
-    static var allFilterCases: [FoodPattern.ConfidenceTier] { [.high, .medium, .low] }
-}
-
-private struct ConfidenceFilterRow: View {
-    @Binding var selected: FoodPattern.ConfidenceTier?
-
-    var body: some View {
-        ScrollView(.horizontal, showsIndicators: false) {
-            HStack(spacing: DS.Spacing.sm) {
-                chipButton(label: "All", isSelected: selected == nil, color: DS.Colors.textSecondary) {
-                    withAnimation(DS.Anim.quick) { selected = nil }
-                }
-                ForEach(FoodPattern.ConfidenceTier.allFilterCases, id: \.filterIndex) { tier in
-                    chipButton(label: tier.filterLabel, isSelected: selected == tier, color: tier.filterColor) {
-                        withAnimation(DS.Anim.quick) {
-                            selected = selected == tier ? nil : tier
-                        }
-                    }
-                }
-            }
-            .padding(.horizontal, DS.Spacing.md)
-            .padding(.vertical, DS.Spacing.xs)
-        }
-    }
-
-    private func chipButton(label: String, isSelected: Bool, color: Color, action: @escaping () -> Void) -> some View {
-        Button(action: action) {
-            Text(label)
-                .font(.system(size: 12, weight: isSelected ? .semibold : .medium, design: .rounded))
-                .foregroundStyle(isSelected ? color : DS.Colors.textFaint)
-                .padding(.horizontal, DS.Spacing.md)
-                .padding(.vertical, 6)
-                .background(
-                    Capsule()
-                        .fill(isSelected ? color.opacity(0.12) : DS.Colors.surface)
-                        .overlay(
-                            Capsule().stroke(isSelected ? color.opacity(0.3) : DS.Colors.border, lineWidth: 0.5)
-                        )
-                )
+            .frame(maxWidth: .infinity, alignment: .leading)
         }
         .buttonStyle(.plain)
+        .glassSubtle()
     }
 }
-
-// MARK: - Pattern Stats Banner
 
 // MARK: - Recovery Heatmap + Sleep↔Recovery Scatter (v6 mockup)
 
@@ -530,24 +314,32 @@ private struct SleepRecoveryScatter: View {
             Text("Sleep vs recovery")
                 .font(.system(size: 10, weight: .bold)).tracking(1.4).textCase(.uppercase)
                 .foregroundStyle(DS.Colors.textMuted)
-            GeometryReader { geo in
-                let w = geo.size.width, h = geo.size.height
-                let px: (Double) -> CGFloat = { CGFloat(($0 - xMin) / xSpan) * w }
-                let py: (Double) -> CGFloat = { h - CGFloat(min(max($0, 0), 100) / 100) * h }
-                ZStack {
-                    Path { p in
-                        p.move(to: CGPoint(x: px(xMin), y: py(slope * xMin + intercept)))
-                        p.addLine(to: CGPoint(x: px(xMax), y: py(slope * xMax + intercept)))
-                    }
-                    .stroke(DS.Colors.violet.opacity(0.7), style: StrokeStyle(lineWidth: 2, dash: [4, 3]))
-                    ForEach(0..<pts.count, id: \.self) { i in
-                        Circle().fill(recColor(pts[i].y))
-                            .frame(width: 7, height: 7)
-                            .position(x: px(pts[i].x), y: py(pts[i].y))
+            HStack(spacing: 6) {
+                VStack {
+                    Text("100").font(.system(size: 9, weight: .semibold)).foregroundStyle(DS.Colors.textMuted)
+                    Spacer()
+                    Text("0").font(.system(size: 9, weight: .semibold)).foregroundStyle(DS.Colors.textMuted)
+                }
+                .frame(height: 128)
+                GeometryReader { geo in
+                    let w = geo.size.width, h = geo.size.height
+                    let px: (Double) -> CGFloat = { CGFloat(($0 - xMin) / xSpan) * w }
+                    let py: (Double) -> CGFloat = { h - CGFloat(min(max($0, 0), 100) / 100) * h }
+                    ZStack {
+                        Path { p in
+                            p.move(to: CGPoint(x: px(xMin), y: py(slope * xMin + intercept)))
+                            p.addLine(to: CGPoint(x: px(xMax), y: py(slope * xMax + intercept)))
+                        }
+                        .stroke(DS.Colors.violet.opacity(0.7), style: StrokeStyle(lineWidth: 2, dash: [4, 3]))
+                        ForEach(0..<pts.count, id: \.self) { i in
+                            Circle().fill(recColor(pts[i].y))
+                                .frame(width: 7, height: 7)
+                                .position(x: px(pts[i].x), y: py(pts[i].y))
+                        }
                     }
                 }
+                .frame(height: 128)
             }
-            .frame(height: 128)
             HStack {
                 Text("\(Int(xMin.rounded()))h").font(.system(size: 9, weight: .semibold)).foregroundStyle(DS.Colors.textMuted)
                 Spacer()
@@ -563,14 +355,14 @@ private struct SleepRecoveryScatter: View {
     }
 }
 
-// MARK: - Featured Pattern Hero (accent card — v6 mockup)
+// MARK: - Featured Discovery (the ONE accent card on the screen)
 
-private struct FeaturedPatternCard: View {
+private struct FeaturedDiscoveryCard: View {
     let pattern: FoodPattern
     private var accent: Color { pattern.effectPositive ? DS.Colors.teal : DS.Colors.danger }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 9) {
+        VStack(alignment: .leading, spacing: 10) {
             HStack(spacing: 7) {
                 Image(systemName: "star.fill")
                     .font(.system(size: 10, weight: .bold))
@@ -580,6 +372,10 @@ private struct FeaturedPatternCard: View {
                     .tracking(1.4)
                     .textCase(.uppercase)
                     .foregroundStyle(DS.Colors.textMuted)
+                Spacer()
+                if let badge = pattern.badgeText {
+                    DeltaBadge(text: badge, positive: pattern.effectPositive)
+                }
             }
             Text(pattern.title)
                 .font(.system(size: 17, weight: .bold))
@@ -591,11 +387,17 @@ private struct FeaturedPatternCard: View {
                     .foregroundStyle(accent)
                     .fixedSize(horizontal: false, vertical: true)
             }
-            Text(pattern.subtitle)
-                .font(.system(size: 13, weight: .medium))
-                .foregroundStyle(DS.Colors.textSecondary)
-                .fixedSize(horizontal: false, vertical: true)
-            Text("\(Int((pattern.confidenceValue * 100).rounded()))% confidence")
+
+            // The evidence — drawn, not narrated.
+            if let comp = pattern.comparison {
+                MiniComparisonBars(comparison: comp, accent: accent)
+                    .padding(.top, 2)
+            } else if let r = pattern.rValue {
+                StrengthMeter(r: r, positive: pattern.effectPositive, sampleN: pattern.sampleN)
+                    .padding(.top, 2)
+            }
+
+            Text(caption)
                 .font(.system(size: 11, weight: .bold, design: .rounded))
                 .monospacedDigit()
                 .foregroundStyle(DS.Colors.violet)
@@ -608,23 +410,51 @@ private struct FeaturedPatternCard: View {
         .background(RoundedRectangle(cornerRadius: 22, style: .continuous).fill(DS.Colors.violet.opacity(0.10)))
         .overlay(RoundedRectangle(cornerRadius: 22, style: .continuous).stroke(DS.Colors.violet.opacity(0.28), lineWidth: 1))
     }
+
+    private var caption: String {
+        var parts = ["\(Int((pattern.confidenceValue * 100).rounded()))% confidence"]
+        if let n = pattern.sampleN, n > 0 { parts.append("\(n) days") }
+        return parts.joined(separator: " · ")
+    }
 }
 
-// MARK: - Diverging Impact Bars (v6 mockup)
+// MARK: - Diverging Impact Bars — effect magnitude, hurts ←→ helps
 
 private struct PatternImpactBars: View {
     let patterns: [FoodPattern]
     private var rows: [FoodPattern] { Array(patterns.prefix(6)) }
 
+    /// Comparable 0–100 impact per pattern: comparison delta (score points /
+    /// pct) where present, |r|×100 for correlations. Honest per-bar labels
+    /// (badgeText) carry the real units.
+    private func magnitude(_ p: FoodPattern) -> Double {
+        if let c = p.comparison { return abs(c.after - c.before) }
+        if let r = p.rValue { return abs(r) * 100 }
+        return p.confidenceValue * 40   // speculative rows render short
+    }
+
     var body: some View {
+        let maxMag = max(rows.map(magnitude).max() ?? 1, 1)
         VStack(alignment: .leading, spacing: 12) {
-            Text("What moves your body")
-                .font(.system(size: 10, weight: .bold))
-                .tracking(1.4)
-                .textCase(.uppercase)
-                .foregroundStyle(DS.Colors.textMuted)
+            HStack {
+                Text("What moves your body")
+                    .font(.system(size: 10, weight: .bold))
+                    .tracking(1.4)
+                    .textCase(.uppercase)
+                    .foregroundStyle(DS.Colors.textMuted)
+                Spacer()
+                HStack(spacing: 4) {
+                    Text("hurts").font(.system(size: 9, weight: .semibold)).foregroundStyle(DS.Colors.danger)
+                    Image(systemName: "arrow.left.and.right")
+                        .font(.system(size: 8, weight: .bold))
+                        .foregroundStyle(DS.Colors.textFaint)
+                    Text("helps").font(.system(size: 9, weight: .semibold)).foregroundStyle(DS.Colors.teal)
+                }
+            }
             VStack(spacing: 10) {
-                ForEach(rows) { DivergingRow(pattern: $0) }
+                ForEach(rows) { p in
+                    DivergingRow(pattern: p, frac: CGFloat(min(max(magnitude(p) / maxMag, 0.08), 1.0)))
+                }
             }
         }
         .padding(15)
@@ -636,8 +466,8 @@ private struct PatternImpactBars: View {
 
 private struct DivergingRow: View {
     let pattern: FoodPattern
+    let frac: CGFloat
     private var color: Color { pattern.effectPositive ? DS.Colors.teal : DS.Colors.danger }
-    private var frac: CGFloat { CGFloat(min(max(pattern.confidenceValue, 0.06), 1.0)) }
 
     var body: some View {
         HStack(spacing: 10) {
@@ -645,7 +475,7 @@ private struct DivergingRow: View {
                 .font(.system(size: 12, weight: .semibold))
                 .foregroundStyle(DS.Colors.textSecondary)
                 .lineLimit(1)
-                .frame(width: 100, alignment: .leading)
+                .frame(width: 92, alignment: .leading)
             GeometryReader { geo in
                 let half = geo.size.width / 2
                 let barW = half * frac
@@ -661,43 +491,12 @@ private struct DivergingRow: View {
                 .frame(maxHeight: .infinity)
             }
             .frame(height: 16)
-        }
-    }
-}
-
-private struct PatternStatsBanner: View {
-    let patterns: [FoodPattern]
-    let entryCount: Int
-
-    private var highCount: Int { patterns.filter { $0.confidenceTier == FoodPattern.ConfidenceTier.high }.count }
-    private var mediumCount: Int { patterns.filter { $0.confidenceTier == FoodPattern.ConfidenceTier.medium }.count }
-    private var lowCount: Int { patterns.filter { $0.confidenceTier == FoodPattern.ConfidenceTier.low }.count }
-
-    var body: some View {
-        HStack(spacing: 0) {
-            statCell(value: "\(entryCount)", label: "Entries", color: DS.Colors.textSecondary)
-            Divider().frame(height: 32).opacity(0.25)
-            statCell(value: "\(highCount)", label: "Established", color: DS.Colors.teal)
-            Divider().frame(height: 32).opacity(0.25)
-            statCell(value: "\(mediumCount)", label: "Emerging", color: DS.Colors.amber)
-            Divider().frame(height: 32).opacity(0.25)
-            statCell(value: "\(lowCount)", label: "Possible", color: DS.Colors.violet)
-        }
-        .padding(.vertical, DS.Spacing.sm)
-        .glassDefault()
-    }
-
-    private func statCell(value: String, label: String, color: Color) -> some View {
-        VStack(spacing: 2) {
-            Text(value)
-                .font(.system(size: 18, weight: .bold, design: .rounded))
-                .foregroundStyle(color)
+            Text(pattern.badgeText ?? "")
+                .font(.system(size: 10, weight: .bold, design: .rounded))
                 .monospacedDigit()
-            Text(label)
-                .font(.system(size: 9, weight: .medium))
-                .foregroundStyle(DS.Colors.textFaint)
+                .foregroundStyle(color)
+                .frame(width: 44, alignment: .trailing)
         }
-        .frame(maxWidth: .infinity)
     }
 }
 
@@ -752,43 +551,6 @@ private struct DataGateCard: View {
     }
 }
 
-// MARK: - Alcohol Impact Card
-
-private struct AlcoholImpactCard: View {
-    let impact: Double
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: DS.Spacing.sm) {
-            HStack(spacing: DS.Spacing.sm) {
-                // Principle #5: amber category dot — food/lifestyle signal
-                CategoryDot(category: .food)
-                Text("ALCOHOL EFFECT")
-                    .font(DS.Font.label)
-                    .foregroundStyle(DS.Colors.amber)
-            }
-            Text(String(format: "HRV was %.0f%% below baseline after alcohol. That explains the lower recovery score the next day — the wine, not you.", impact))
-                .font(.system(size: 13, weight: .regular))
-                .foregroundStyle(DS.Colors.textSecondary)
-        }
-        .padding(DS.Spacing.md)
-        .glassDefault()
-    }
-}
-
-// MARK: - Methodology Note
-
-private struct MethodologyNote: View {
-    let entryCount: Int
-
-    var body: some View {
-        PatternNote(
-            text: "Correlations based on \(entryCount) entries. Calculated from: NOVA score, Mind score, and recovery delta after meals. No causation, only patterns.",
-            icon: "info.circle",
-            color: DS.Colors.textFaint
-        )
-    }
-}
-
 // MARK: - Insight Engine (real correlations)
 //
 // REWRITE (2026-06-01): the old engine multiplied the CURRENT recovery score
@@ -798,6 +560,8 @@ private struct MethodologyNote: View {
 //     hundreds of real days, live TODAY.
 //   • Food / alcohol → next-day recovery, food → sleep — real once food
 //     logging accumulates; honestly gated until then (no fake numbers).
+// 2026-07: same math, now also emits the numbers (sampleN, rValue, comparison,
+// badgeText) so the cards can draw evidence instead of narrating it.
 
 enum InsightEngine {
 
@@ -853,8 +617,11 @@ enum InsightEngine {
                 subtitle: "Across \(hrvPair.0.count) days, higher morning HRV preceded higher recovery.",
                 confidenceTier: tier(n: hrvPair.0.count, r: r),
                 confidenceValue: min(abs(r), 1.0),
-                effectDescription: "\(strength(r)) link · r \(String(format: "%.2f", r))",
-                effectPositive: r > 0))
+                effectDescription: "\(strength(r)) link",
+                effectPositive: r > 0,
+                sampleN: hrvPair.0.count,
+                rValue: r,
+                badgeText: String(format: "r %.2f", r)))
         }
 
         let rhrPair = paired { $0.restingHr }
@@ -864,8 +631,11 @@ enum InsightEngine {
                 subtitle: "Lower resting heart rate nights tend to precede stronger recovery.",
                 confidenceTier: tier(n: rhrPair.0.count, r: r),
                 confidenceValue: min(abs(r), 1.0),
-                effectDescription: "\(strength(r))\(r < 0 ? " inverse" : "") link · r \(String(format: "%.2f", r))",
-                effectPositive: r < 0))
+                effectDescription: "\(strength(r))\(r < 0 ? " inverse" : "") link",
+                effectPositive: r < 0,
+                sampleN: rhrPair.0.count,
+                rValue: r,
+                badgeText: String(format: "r %.2f", r)))
         }
 
         let slpPair = paired { $0.sleepHours }
@@ -875,8 +645,11 @@ enum InsightEngine {
                 subtitle: "Recovery measured against sleep length over \(slpPair.0.count) nights.",
                 confidenceTier: tier(n: slpPair.0.count, r: r),
                 confidenceValue: min(abs(r), 1.0),
-                effectDescription: "\(strength(r)) link · r \(String(format: "%.2f", r))",
-                effectPositive: r > 0))
+                effectDescription: "\(strength(r)) link",
+                effectPositive: r > 0,
+                sampleN: slpPair.0.count,
+                rValue: r,
+                badgeText: String(format: "r %.2f", r)))
         }
 
         // ── Food-dependent (real once logging accumulates) ───────────────
@@ -912,7 +685,12 @@ enum InsightEngine {
                 confidenceTier: alcRecov.count >= 8 ? .high : .medium,
                 confidenceValue: min(Double(alcRecov.count) / 12.0, 1.0),
                 effectDescription: String(format: "%+.0f%% recovery the morning after", pct),
-                effectPositive: (a - s) >= 0))
+                effectPositive: (a - s) >= 0,
+                sampleN: alcRecov.count + soberRecov.count,
+                comparison: PatternComparison(
+                    beforeLabel: "sober nights", afterLabel: "after drinking",
+                    before: s, after: a, unit: "recovery"),
+                badgeText: String(format: "%+.0f%%", pct)))
         }
 
         // High-NOVA day → that night's sleep score
@@ -931,7 +709,12 @@ enum InsightEngine {
                 confidenceTier: novaSleep.count >= 10 ? .high : .medium,
                 confidenceValue: min(Double(novaSleep.count) / 14.0, 1.0),
                 effectDescription: String(format: "%+.0f sleep score on processed days", hi - lo),
-                effectPositive: (hi - lo) >= 0))
+                effectPositive: (hi - lo) >= 0,
+                sampleN: novaSleep.count + cleanSleep.count,
+                comparison: PatternComparison(
+                    beforeLabel: "cleaner days", afterLabel: "processed days",
+                    before: lo, after: hi, unit: "sleep score"),
+                badgeText: String(format: "%+.0f", hi - lo)))
         }
 
         return out.sorted { $0.confidenceValue > $1.confidenceValue }
