@@ -21,18 +21,29 @@ struct BodyBatteryHero: View {
     let sleepHours: Double
     let strain: Double         // 0..21
     var trend: [BodyBatteryPoint] = []   // 24h curve (server) — empty = hide chart
+    var overlay: RecoveryOverlay = .neutral   // replaces the status chip when active
 
     private var lvl: Int { Int(level.rounded()) }
     private var color: Color { DS.Colors.bodyBatteryColor(level) }
 
-    private var statusLine: String {
+    // The ONE interpretive slot on Today. 2–3 words — the bar + color + number
+    // already encode the rest. RecoveryOverlay REPLACES this in-place when
+    // active (illness/alcohol/red days); voices never stack.
+    private var chipText: String {
+        if overlay.shouldShow { return overlay.title }
         switch level {
-        case 75...:    return "Full tank. Green light to push hard today."
-        case 55..<75:  return "Good charge. Train, work, go — just don't redline."
-        case 35..<55:  return "Half tank. A normal day's fine; skip the big efforts."
-        case 20..<35:  return "Low. Protect it — easy day, real recovery."
-        default:       return "Running on fumes. Rest is the only smart move."
+        case 75...:    return "Full tank"
+        case 55..<75:  return "Good charge"
+        case 35..<55:  return "Half tank"
+        case 20..<35:  return "Protect it"
+        default:       return "On fumes"
         }
+    }
+    private var chipIcon: String {
+        overlay.shouldShow ? overlay.icon : "bolt.fill"
+    }
+    private var chipColor: Color {
+        overlay.shouldShow ? overlay.accent : color
     }
     private var stressLabel: String {
         if strain >= 14 { return "high" }
@@ -91,17 +102,35 @@ struct BodyBatteryHero: View {
                 .padding(.top, 2)
             }
 
-            // Plain-language status
-            Text(statusLine)
-                .font(.system(size: 13, weight: .medium))
-                .foregroundStyle(DS.Colors.textSecondary)
-                .fixedSize(horizontal: false, vertical: true)
+            // ONE interpretive slot — chip, not sentence. Overlay swaps the
+            // content in-place (never a second banner).
+            HStack(spacing: 6) {
+                Image(systemName: chipIcon)
+                    .font(.system(size: 10, weight: .bold))
+                Text(chipText)
+                    .font(.system(size: 12, weight: .bold, design: .rounded))
+                    .contentTransition(.opacity)
+            }
+            .foregroundStyle(chipColor)
+            .padding(.horizontal, 11)
+            .padding(.vertical, 6)
+            .background(Capsule().fill(chipColor.opacity(0.12)))
+            .overlay(Capsule().stroke(chipColor.opacity(0.28), lineWidth: 0.5))
+            .animation(DS.Anim.quick, value: chipText)
+            .accessibilityLabel("Status: \(chipText)")
 
             Divider().background(DS.Colors.border)
 
-            // Secondary row — recovery DEMOTED here (still visible, not the headline)
+            // Secondary row — recovery DEMOTED here (still visible, not the
+            // headline), with the live "vs your normal" percentile beside it.
             HStack(spacing: 0) {
-                secondaryStat("recovery", "\(Int(recovery))", DS.Colors.recoveryColor(recovery))
+                VStack(spacing: 4) {
+                    secondaryStat("recovery", "\(Int(recovery))", DS.Colors.recoveryColor(recovery))
+                    if recovery > 0 {
+                        PersonalPercentileChip(metric: "recovery_score", value: recovery)
+                    }
+                }
+                .frame(maxWidth: .infinity)
                 statDivider
                 secondaryStat("sleep", String(format: "%.1fh", sleepHours), DS.Colors.textSecondary)
                 statDivider
