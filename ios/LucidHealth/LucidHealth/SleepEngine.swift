@@ -151,7 +151,12 @@ extension HealthEngine {
 
         // Wake detection: only block during deep-sleep hours (midnight-5am)
         let deepSleepProtection = hour >= 0 && hour < 5
-        let trulyAwakeFromSleep = sleepDetected && sustainedHighHRMinutes >= 10 && !deepSleepProtection
+        // v115 — the deep-sleep shield is no longer absolute. 10 sustained min
+        // above wakeThreshold+20 is unambiguously awake even at 2am. On Jul 14
+        // HR sat at 100–112 for over an hour and the latched detector still
+        // called it "light sleep" because deepSleepProtection blocked every wake.
+        let trulyAwakeFromSleep = sleepDetected && sustainedHighHRMinutes >= 10
+            && (!deepSleepProtection || avgHR > wakeThreshold + 20)
 
         // v98 — movement-confirmed wake. If sustained movement ≥5 min during morning
         // hours (5am-12pm) while sleepDetected, fire wake regardless of HR threshold.
@@ -174,24 +179,24 @@ extension HealthEngine {
                 sustainedLowHRMinutes = 0
             } else if moving && avgHR > sleepRHR * 1.2 {
                 newStage = .light
-                sustainedHighHRMinutes = 0
             } else if avgHR < deepHRCeiling && hrSD < deepSDMax && hrv > baselineHRV * 0.8 {
                 newStage = .deep
-                sustainedHighHRMinutes = 0
             } else if still && hrSD > remSDMin && (hrv < remHRVDrop || avgHR > sleepRHR * 1.1 || rrIrregularity > 0.08) {
                 newStage = .rem
-                sustainedHighHRMinutes = 0
             } else if hrSD > remSDMin && !hasIMU && (hrv < remHRVDrop || rrIrregularity > 0.08 || rrFallbackREM) {
                 newStage = .rem
-                sustainedHighHRMinutes = 0
             } else if rrFallbackREM {
                 // RR data sparse + 90min+ into sleep + some HR variability → REM more likely than light
                 newStage = .rem
-                sustainedHighHRMinutes = 0
             } else {
                 newStage = .light
-                sustainedHighHRMinutes = 0
             }
+            // v115 — do NOT reset sustainedHighHRMinutes here. The accumulator
+            // (avgHR<sleepThreshold → 0, avgHR>wakeThreshold → +=) is the sole
+            // owner. The old per-stage resets wiped it every 2-min tick, so it
+            // never reached the 10-min wake threshold — the detector latched
+            // into "asleep" at 21:07 and never released (Jul 14: called HR 112
+            // "light sleep"). Only a genuine 10-min sustained elevation wakes.
         } else {
             if avgHR > sleepThreshold || hrSD > 8 {
                 newStage = .awake
@@ -633,10 +638,15 @@ extension HealthEngine {
         // Sleep Fragmentation Index — transitions per hour of sleep
         let fragIndex = durationHours > 0 ? Double(stageTransitionCount) / durationHours : 0
 
+        // v115 — server is authoritative for the persisted daily numbers.
+        // recompute_health_metrics (server) + HealthEngine's restore own
+        // duration / score / efficiency / stage-minutes. computeSleepScore's
+        // on-device values are built on the live stage accumulator, which
+        // latches on chronic-low-HR nights and wrote a 1.1h clobber over the
+        // server's correct 6.8h on Jul 14. Publish ONLY the fragmentation index
+        // (no server equivalent); everything else stays server-owned.
+        print("[SleepScore] on-device estimate (NOT published, server wins): score=\(Int(min(score, 100))) dur=\(String(format: "%.1f", durationHours))h eff=\(Int(efficiency))")
         DispatchQueue.main.async {
-            self.sleepScore = round(min(score, 100))
-            self.sleepDurationHours = round(durationHours * 10) / 10
-            self.sleepEfficiency = round(efficiency)
             self.sleepFragmentationIndex = round(fragIndex * 10) / 10
         }
 
