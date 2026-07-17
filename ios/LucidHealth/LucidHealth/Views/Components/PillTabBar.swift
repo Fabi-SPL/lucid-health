@@ -1,6 +1,7 @@
 import SwiftUI
 
-/// Floating glass-pill tab bar — principle #8.
+/// Floating Aurora tab bar — 60pt, radius-26, icon-only, square accent
+/// indicator behind the active icon (per AURORA-DESIGN-SPEC §2).
 /// 4 tabs: Today / Health / Food / Insights.
 /// Settings is NOT a tab — accessed via SettingsGearButton sheet.
 enum AppTab: Int, CaseIterable {
@@ -11,7 +12,7 @@ enum AppTab: Int, CaseIterable {
         case .today:    return "sun.max.fill"
         case .health:   return "heart.fill"
         case .food:     return "fork.knife"
-        case .insights: return "sparkles"
+        case .insights: return "chart.bar.fill"
         }
     }
 
@@ -38,16 +39,19 @@ struct PillTabBar: View {
                     tabItem(tab)
                 }
                 .buttonStyle(.plain)
+                .accessibilityLabel(tab.label)
             }
         }
         .padding(.horizontal, 8)
-        .padding(.vertical, 6)
-        .frame(height: 56)                      // hard-cap height — iOS 26 .glassEffect won't blow up
+        .frame(height: 60)
         // ONE selection haptic per switch — was inside the ForEach (fired 4× per tap).
         .sensoryFeedback(.selection, trigger: selectedTab)
-        .background(Capsule().fill(DS.Colors.cardFillElevated))   // flat solid pill (was Liquid Glass)
+        .background(
+            RoundedRectangle(cornerRadius: 26, style: .continuous)
+                .fill(DS.Colors.cardFillElevated)
+        )
         .overlay(
-            Capsule()
+            RoundedRectangle(cornerRadius: 26, style: .continuous)
                 .stroke(DS.Colors.border, lineWidth: 0.5)
         )
         .padding(.horizontal, 32)
@@ -60,28 +64,20 @@ struct PillTabBar: View {
 
         ZStack {
             if isActive {
-                Capsule()
-                    .fill(DS.Colors.violet.opacity(0.18))
+                RoundedRectangle(cornerRadius: 16, style: .continuous)
+                    .fill(DS.Colors.violet.opacity(0.14))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 16, style: .continuous)
+                            .stroke(DS.Colors.borderViolet, lineWidth: 0.5)
+                    )
+                    .frame(width: 44, height: 44)
                     .matchedGeometryEffect(id: "tabIndicator", in: indicator)
             }
 
-            HStack(spacing: isActive ? 5 : 0) {
-                Image(systemName: tab.icon)
-                    .font(.system(size: 16, weight: .semibold))
-                    .symbolRenderingMode(.hierarchical)
-                    .foregroundStyle(isActive ? DS.Colors.violet : DS.Colors.textMuted)
-
-                if isActive {
-                    Text(tab.label)
-                        .font(.system(size: 13, weight: .semibold, design: .rounded))
-                        .foregroundStyle(DS.Colors.violet)
-                        .lineLimit(1)
-                        .fixedSize(horizontal: true, vertical: false)
-                        .transition(.opacity.combined(with: .scale(scale: 0.85)))
-                }
-            }
-            .padding(.horizontal, isActive ? 12 : 10)
-            .padding(.vertical, 8)
+            Image(systemName: tab.icon)
+                .font(.system(size: 17, weight: .semibold))
+                .symbolRenderingMode(.hierarchical)
+                .foregroundStyle(isActive ? DS.Colors.violet : DS.Colors.textMuted)
         }
         .frame(maxWidth: .infinity, minHeight: 44)
         .contentShape(Rectangle())

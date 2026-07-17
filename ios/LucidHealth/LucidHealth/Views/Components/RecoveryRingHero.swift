@@ -2,7 +2,7 @@ import SwiftUI
 
 /// Large animated recovery ring — primary hero element on TodayView.
 /// Backwards-compatible signature. Upgraded internals: ringEntrance spring,
-/// violet→teal gradient when recovered, statusGlow halo, breathing animation.
+/// violet→teal gradient when recovered, breathing animation.
 struct RecoveryRingHero: View {
     let score: Double        // 0–100
     let label: String        // "Good", "Okay", "Low"
@@ -45,7 +45,6 @@ struct RecoveryRingHero: View {
                 .frame(width: size, height: size)
                 .rotationEffect(.degrees(-90))
                 .animation(DS.Anim.ringEntrance.delay(0.1), value: appeared)
-                .statusGlow(glowColor, intensity: appeared ? 0.8 : 0)
 
             // Center content
             VStack(spacing: 2) {
