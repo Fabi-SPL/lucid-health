@@ -108,7 +108,6 @@ struct HeroRecoveryRing: View {
                 .rotationEffect(.degrees(-90))
                 .animation(DS.Anim.ringEntrance.delay(0.15), value: appeared)
                 .animation(.easeInOut(duration: 0.6), value: scoreColor)
-                .statusGlow(scoreColor, intensity: appeared ? 1.0 : 0)
 
             // Center content
             VStack(spacing: 3) {
@@ -266,7 +265,6 @@ struct SmokeRecoveryRing: View {
                 .rotationEffect(.degrees(-90))
                 .animation(DS.Anim.ringEntrance.delay(0.15), value: appeared)
                 .animation(.easeInOut(duration: 0.6), value: scoreColor)
-                .statusGlow(scoreColor, intensity: appeared ? 1.0 : 0)
 
             // ── Center content ────────────────────────────────────────────
             VStack(spacing: 3) {

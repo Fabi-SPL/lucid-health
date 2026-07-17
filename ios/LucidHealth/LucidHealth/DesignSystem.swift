@@ -1,15 +1,22 @@
 import SwiftUI
 
 // ════════════════════════════════════════════════════════════
-// Lucid Design System — Single source of truth for all UI
-// Based on: Lucid brand system + research spec (02-design-system-spec.html)
+// Lucid Design System — single source of truth for all UI
+// Canon: AURORA-DESIGN-SPEC.md (LOCKED 2026-06-24) + the four approved mockups
 //
-// Rules:
-//   - Never use raw Color literals (.gray, .red) — always DS.Colors.*
-//   - Never use raw font sizes — always DS.Font.*
-//   - Never use raw padding values — always DS.Spacing.*
-//   - Every card uses GlassCard or HeroCard modifier
-//   - Background is always MeshGradientBackground, never Color.black
+// The 5 Aurora laws:
+//   1. Depth = ONE Aurora glow + card luminance + 1px borders.
+//      Never glass, blur, reflections, specular sweeps, or dark-mode shadows.
+//   2. Tokens only — DS.Colors / DS.Font / DS.Spacing / DS.Radius.
+//      No raw Color literals, font sizes, or padding values in views.
+//   3. Every number is monospacedDigit; display type gets negative tracking;
+//      weights regular/semibold/heavy only — never medium for hierarchy.
+//   4. One section grammar: uppercase tracked micro-label above a radius-20
+//      card (15pt padding); chips and tab bar are pills; nested tiles use a
+//      smaller radius than their parent.
+//   5. Accents stay restrained: violet/teal brand + the semantic table
+//      (green/amber/red/blue). Every section reads as a DIFFERENT chart
+//      shape — never two of the same on one screen.
 // ════════════════════════════════════════════════════════════
 
 enum DS {
@@ -116,21 +123,27 @@ enum DS {
                 : UIColor(red: 0.051, green: 0.580, blue: 0.533, alpha: 1)    // #0d9488
         })
 
-        // Semantic (adaptive)
+        // Semantic (adaptive) — Aurora table: green #34d39a, amber #f5b948,
+        // red #f06464, blue #5b8def in dark; darker siblings in light.
         static let success = Color(UIColor { tc in
             tc.userInterfaceStyle == .dark
-                ? UIColor(red: 0.063, green: 0.725, blue: 0.506, alpha: 1)    // #10b981
-                : UIColor(red: 0.020, green: 0.588, blue: 0.412, alpha: 1)    // #059669
+                ? UIColor(red: 0.204, green: 0.827, blue: 0.604, alpha: 1)    // #34d39a
+                : UIColor(red: 0.063, green: 0.659, blue: 0.400, alpha: 1)    // #10a866
         })
         static let danger = Color(UIColor { tc in
             tc.userInterfaceStyle == .dark
-                ? UIColor(red: 0.937, green: 0.267, blue: 0.267, alpha: 1)    // #ef4444
-                : UIColor(red: 0.863, green: 0.149, blue: 0.149, alpha: 1)    // #dc2626
+                ? UIColor(red: 0.941, green: 0.392, blue: 0.392, alpha: 1)    // #f06464
+                : UIColor(red: 0.812, green: 0.251, blue: 0.251, alpha: 1)    // #cf4040
         })
         static let warning = Color(UIColor { tc in
             tc.userInterfaceStyle == .dark
-                ? UIColor(red: 0.984, green: 0.749, blue: 0.141, alpha: 1)    // #fbbf24
-                : UIColor(red: 0.851, green: 0.467, blue: 0.024, alpha: 1)    // #d97706
+                ? UIColor(red: 0.961, green: 0.725, blue: 0.282, alpha: 1)    // #f5b948
+                : UIColor(red: 0.741, green: 0.490, blue: 0.063, alpha: 1)    // #bd7d10
+        })
+        static let blue = Color(UIColor { tc in
+            tc.userInterfaceStyle == .dark
+                ? UIColor(red: 0.357, green: 0.553, blue: 0.937, alpha: 1)    // #5b8def
+                : UIColor(red: 0.247, green: 0.435, blue: 0.816, alpha: 1)    // #3f6fd0
         })
 
         static let pink = Color(UIColor { tc in
@@ -138,11 +151,7 @@ enum DS {
                 ? UIColor(red: 0.925, green: 0.282, blue: 0.600, alpha: 1)    // #EC4899
                 : UIColor(red: 0.780, green: 0.157, blue: 0.478, alpha: 1)    // #c7287a
         })
-        static let amber = Color(UIColor { tc in
-            tc.userInterfaceStyle == .dark
-                ? UIColor(red: 0.965, green: 0.624, blue: 0.044, alpha: 1)    // #F59E0B
-                : UIColor(red: 0.851, green: 0.467, blue: 0.024, alpha: 1)    // #d97706
-        })
+        static let amber = warning
 
         // Borders (adaptive)
         static let border = Color(UIColor { tc in
@@ -165,14 +174,6 @@ enum DS {
             tc.userInterfaceStyle == .dark
                 ? UIColor(red: 0.310, green: 0.820, blue: 0.773, alpha: 0.15)
                 : UIColor(red: 0.051, green: 0.580, blue: 0.533, alpha: 0.20)
-        })
-
-        /// Shimmer/specular highlight — white reads on dark glass, but is
-        /// invisible white-on-white in light mode. Violet-tinted there instead.
-        static let shimmer = Color(UIColor { tc in
-            tc.userInterfaceStyle == .dark
-                ? UIColor(white: 1.0, alpha: 1.0)
-                : UIColor(red: 0.486, green: 0.361, blue: 0.749, alpha: 1.0)
         })
 
         // Recovery zones
@@ -225,7 +226,7 @@ enum DS {
             case .awake: return warning
             case .light: return Color(hex: 0xFDE68A) // soft yellow
             case .deep: return teal
-            case .rem: return violet
+            case .rem: return blue
             }
         }
 
@@ -251,25 +252,6 @@ enum DS {
             startPoint: .topLeading,
             endPoint: .bottomTrailing
         )
-
-        static let heroGradient = LinearGradient(
-            colors: [violet.opacity(0.12), teal.opacity(0.06)],
-            startPoint: .topLeading,
-            endPoint: .bottomTrailing
-        )
-
-        // Status glow halos (used by StatusGlow modifier)
-        static let glowViolet  = violet.opacity(0.35)
-        static let glowSuccess = success.opacity(0.30)
-        static let glowAmber   = warning.opacity(0.30)
-        static let glowDanger  = danger.opacity(0.30)
-
-        // Category dots (principle #5)
-        static let categoryBody  = violet
-        static let categoryMind  = teal
-        static let categoryCare  = amber
-        static let categorySleep = Color(hex: 0xA78BFA)  // soft lavender
-        static let categoryFood  = success
     }
 
     // MARK: - Typography
@@ -286,11 +268,12 @@ enum DS {
         static let label = SwiftUI.Font.system(size: 10, weight: .bold)
         static let micro = SwiftUI.Font.system(size: 8, weight: .bold)
 
-        // Numeric — sized for 393pt width
-        static let heroNumber = SwiftUI.Font.system(size: 44, weight: .heavy, design: .rounded)
-        static let bigNumber = SwiftUI.Font.system(size: 24, weight: .bold, design: .rounded)
-        static let scoreNumber = SwiftUI.Font.system(size: 20, weight: .heavy, design: .rounded)
-        static let statNumber = SwiftUI.Font.system(size: 16, weight: .bold, design: .rounded)
+        // Numeric — sized for 393pt width. monospacedDigit baked in (Aurora law
+        // #3: tabular numbers everywhere) so callers can't forget it.
+        static let heroNumber = SwiftUI.Font.system(size: 44, weight: .heavy, design: .rounded).monospacedDigit()
+        static let bigNumber = SwiftUI.Font.system(size: 24, weight: .bold, design: .rounded).monospacedDigit()
+        static let scoreNumber = SwiftUI.Font.system(size: 20, weight: .heavy, design: .rounded).monospacedDigit()
+        static let statNumber = SwiftUI.Font.system(size: 16, weight: .bold, design: .rounded).monospacedDigit()
     }
 
     // MARK: - Animations
@@ -319,14 +302,6 @@ enum DS {
         static func stagger(index: Int) -> Animation {
             cardAppear.delay(Double(min(index, 8)) * 0.05)
         }
-    }
-
-    // MARK: - Glow Colors (status halos)
-    enum Glow {
-        static let violet = DS.Colors.violet.opacity(0.35)
-        static let success = DS.Colors.success.opacity(0.30)
-        static let amber = DS.Colors.amber.opacity(0.30)
-        static let danger = DS.Colors.danger.opacity(0.30)
     }
 
     // MARK: - Haptics (one vocabulary, app-wide)
@@ -450,176 +425,12 @@ struct AuroraBackground: View {
     }
 }
 
-// MARK: - Mesh Gradient Background (iOS 18+ MeshGradient, animated) — LEGACY, unused
-struct MeshGradientBackground: View {
-    @Environment(\.colorScheme) var colorScheme
-    @Environment(\.accessibilityReduceMotion) var reduceMotion
-
-    // Animate mesh control points for ambient life (20s loop)
-    @State private var phase: Double = 0
-
-    var body: some View {
-        TimelineView(.animation(minimumInterval: reduceMotion ? 99999 : 1.0 / 12.0)) { context in
-            let t = reduceMotion ? 0.0 : context.date.timeIntervalSinceReferenceDate
-                .truncatingRemainder(dividingBy: 20.0) / 20.0
-            let drift = Float(sin(t * .pi * 2) * 0.04)
-            let drift2 = Float(cos(t * .pi * 2) * 0.05)
-
-            ZStack {
-                DS.Colors.bg.ignoresSafeArea()
-
-                if colorScheme == .dark {
-                    // PURPLE-ONLY (no teal). Soft violet base anchors + two
-                    // drifting violet "clouds" at different scales — gives the
-                    // background organic depth that glass surfaces actually
-                    // refract against. Uniform black = flat gray cards.
-                    //
-                    // Anchors are deep purple-black (#0A0612 / #100A1F) instead
-                    // of pure black so the dark mode reads as "lucid violet"
-                    // not "void". Less harsh on the eyes at night.
-                    MeshGradient(
-                        width: 3, height: 3,
-                        points: [
-                            [0.0, 0.0], [0.5, 0.0], [1.0, 0.0],
-                            [0.0, 0.5], [0.32 + drift, 0.22 + drift * 0.5], [1.0, 0.5],
-                            [0.0, 1.0], [0.68 - drift, 0.78 - drift * 0.5], [1.0, 1.0]
-                        ],
-                        colors: [
-                            Color(hex: 0x0A0612), Color(hex: 0x0F0A1F), Color(hex: 0x0A0612),
-                            Color(hex: 0x0F0A1F), DS.Colors.violet.opacity(0.32), Color(hex: 0x0F0A1F),
-                            Color(hex: 0x0A0612), Color(hex: 0x12082A).opacity(0.95), Color(hex: 0x0A0612)
-                        ]
-                    )
-                    .ignoresSafeArea()
-                    // Second violet cloud — slower drift, different position,
-                    // larger soft bloom. Stacked via .screen blend so it
-                    // brightens rather than replaces.
-                    MeshGradient(
-                        width: 2, height: 2,
-                        points: [
-                            [0.15 + drift2 * 0.5, 0.30 + drift2 * 0.3],
-                            [0.85, 0.20],
-                            [0.20, 0.75 - drift2 * 0.3],
-                            [0.80 - drift2 * 0.5, 0.85]
-                        ],
-                        colors: [
-                            DS.Colors.violet.opacity(0.20),
-                            Color.clear,
-                            Color.clear,
-                            DS.Colors.violet.opacity(0.16)
-                        ]
-                    )
-                    .ignoresSafeArea()
-                    .blendMode(.screen)
-                    // Subtle warmth — soft pink-violet bloom in the center,
-                    // pulses gently with drift. Adds painterly feel without
-                    // introducing teal.
-                    MeshGradient(
-                        width: 2, height: 2,
-                        points: [[0.0, 0.0], [1.0, 0.0], [0.0, 1.0], [1.0, 1.0]],
-                        colors: [
-                            Color(hex: 0xB57BFF).opacity(0.00),
-                            Color(hex: 0xB57BFF).opacity(0.00),
-                            Color(hex: 0xB57BFF).opacity(0.00),
-                            Color(hex: 0xB57BFF).opacity(0.06 + Double(abs(drift)) * 0.2)
-                        ]
-                    )
-                    .ignoresSafeArea()
-                    .blendMode(.screen)
-                } else {
-                    // Light mode — purple-only. Darker lavender than before
-                    // (#D6C5E8 base) so the background actually exists visually
-                    // instead of disappearing into white. Two cloud layers
-                    // composited via opacity (NOT .multiply — that was causing
-                    // Color.clear corners to wipe the base back to white).
-                    MeshGradient(
-                        width: 3, height: 3,
-                        points: [
-                            [0.0, 0.0], [0.5, 0.0], [1.0, 0.0],
-                            [0.0, 0.5], [0.25 + drift, 0.25 + drift * 0.5], [1.0, 0.5],
-                            [0.0, 1.0], [0.75 - drift, 0.65 - drift * 0.5], [1.0, 1.0]
-                        ],
-                        colors: [
-                            Color(hex: 0xD6C5E8), Color(hex: 0xDBC9EC), Color(hex: 0xD6C5E8),
-                            Color(hex: 0xDBC9EC), DS.Colors.violet.opacity(0.42), Color(hex: 0xDBC9EC),
-                            Color(hex: 0xD0BEE3), Color(hex: 0xC9B5DD), Color(hex: 0xD0BEE3)
-                        ]
-                    )
-                    .ignoresSafeArea()
-                    // Second cloud — uses lavender base instead of Color.clear
-                    // for the non-bloom corners so layering doesn't clip
-                    // through to the underlying DS.Colors.bg (near-white).
-                    // Lower overall opacity instead of blend mode tricks.
-                    MeshGradient(
-                        width: 2, height: 2,
-                        points: [
-                            [0.20 + drift2 * 0.4, 0.30 + drift2 * 0.3],
-                            [0.85, 0.18],
-                            [0.18, 0.78 - drift2 * 0.3],
-                            [0.82 - drift2 * 0.4, 0.85]
-                        ],
-                        colors: [
-                            DS.Colors.violet.opacity(0.35),
-                            Color(hex: 0xD6C5E8),
-                            Color(hex: 0xD6C5E8),
-                            DS.Colors.violet.opacity(0.28)
-                        ]
-                    )
-                    .opacity(0.55)
-                    .ignoresSafeArea()
-                }
-
-                // Dot grid overlay — gives glass cards something to refract
-                // (uniform mesh = flat-looking glass). 24pt spacing, 1.5pt dots.
-                // Visible but minimalist — Apple Settings background pattern.
-                DotGridOverlay()
-            }
-        }
-    }
-}
-
-// MARK: - Dot Grid Overlay
-
-/// Static dot grid used by MeshGradientBackground. The whole point: glass
-/// surfaces need high-frequency content underneath to refract visibly,
-/// otherwise they look like flat gray boxes.
-struct DotGridOverlay: View {
-    @Environment(\.colorScheme) var colorScheme
-    var spacing: CGFloat = 24
-    var dotSize: CGFloat = 1.5
-
-    var body: some View {
-        Canvas { context, size in
-            // Tinted toward violet (not pure white/black) so the grid
-            // integrates with the purple-only palette instead of fighting it.
-            let color: Color = colorScheme == .dark
-                ? Color(hex: 0xC0A8E8).opacity(0.10)
-                : Color(hex: 0x4A3870).opacity(0.12)
-            let cols = Int(size.width / spacing) + 2
-            let rows = Int(size.height / spacing) + 2
-            for row in 0..<rows {
-                for col in 0..<cols {
-                    let x = CGFloat(col) * spacing
-                    let y = CGFloat(row) * spacing
-                    let rect = CGRect(
-                        x: x - dotSize / 2,
-                        y: y - dotSize / 2,
-                        width: dotSize,
-                        height: dotSize
-                    )
-                    context.fill(Path(ellipseIn: rect), with: .color(color))
-                }
-            }
-        }
-        .ignoresSafeArea()
-        .allowsHitTesting(false)
-    }
-}
-
-// MARK: - Liquid Glass — 4 Tier System (iOS 26 .glassEffect API)
+// MARK: - Aurora card tiers
+// Flat luminance cards (Aurora law #1) — the .glass* method names are kept for
+// source stability; the tiers themselves are Aurora, not glass.
 
 /// Tier 1 — Subtle: list rows, nested cells (16px radius)
-struct GlassSubtle: ViewModifier {
+struct AuroraSubtle: ViewModifier {
     func body(content: Content) -> some View {
         content
             .background(
@@ -633,8 +444,8 @@ struct GlassSubtle: ViewModifier {
     }
 }
 
-/// Tier 2 — Default: standard cards (20px radius) with inner shimmer top edge
-struct GlassDefault: ViewModifier {
+/// Tier 2 — Default: standard cards (20px radius)
+struct AuroraDefault: ViewModifier {
     func body(content: Content) -> some View {
         content
             .background(
@@ -648,24 +459,8 @@ struct GlassDefault: ViewModifier {
     }
 }
 
-/// Tier 3 — Hero: ONE per page, gradient tint + specular shimmer + halo glow (24px radius)
-struct GlassHero: ViewModifier {
-    func body(content: Content) -> some View {
-        content
-            .background(
-                RoundedRectangle(cornerRadius: DS.Radius.xl, style: .continuous)
-                    .fill(DS.Colors.cardFillElevated)
-            )
-            .overlay(
-                RoundedRectangle(cornerRadius: DS.Radius.xl, style: .continuous)
-                    .stroke(DS.Colors.border, lineWidth: 0.5)
-            )
-            .shadow(color: .black.opacity(0.22), radius: 12, x: 0, y: 4)
-    }
-}
-
-/// Tier 4 — Pill: chips, tabs, FABs (100px / capsule)
-struct GlassPill: ViewModifier {
+/// Tier 3 — Pill: chips, tabs, FABs (100px / capsule)
+struct AuroraPill: ViewModifier {
     func body(content: Content) -> some View {
         content
             .background(Capsule().fill(DS.Colors.cardFillElevated))
@@ -673,12 +468,11 @@ struct GlassPill: ViewModifier {
     }
 }
 
-// MARK: - Convenience extension for 4 glass tiers
+// MARK: - Convenience extension for the Aurora tiers
 extension View {
-    func glassSubtle()  -> some View { modifier(GlassSubtle()) }
-    func glassDefault() -> some View { modifier(GlassDefault()) }
-    func glassHero()    -> some View { modifier(GlassHero()) }
-    func glassPill()    -> some View { modifier(GlassPill()) }
+    func glassSubtle()  -> some View { modifier(AuroraSubtle()) }
+    func glassDefault() -> some View { modifier(AuroraDefault()) }
+    func glassPill()    -> some View { modifier(AuroraPill()) }
 
     /// Subtle scale + opacity falloff as a section leaves the viewport.
     /// Keeps cards feeling alive without the "obvious AI animation" tell.
@@ -692,26 +486,7 @@ extension View {
     }
 }
 
-// MARK: - Status Glow Modifier
-
-struct StatusGlowModifier: ViewModifier {
-    let color: Color
-    var intensity: Double
-
-    func body(content: Content) -> some View {
-        content
-            .shadow(color: color.opacity(0.35 * intensity), radius: 20, x: 0, y: 0)
-            .shadow(color: color.opacity(0.20 * intensity), radius: 40, x: 0, y: 0)
-    }
-}
-
-extension View {
-    func statusGlow(_ color: Color, intensity: Double = 1.0) -> some View {
-        modifier(StatusGlowModifier(color: color, intensity: intensity))
-    }
-}
-
-// MARK: - Glass Card (Liquid Glass on iOS 26, material fallback on 17-18)
+// MARK: - Glass Card (Aurora flat card, legacy name)
 
 struct GlassCard: ViewModifier {
     var padding: CGFloat = DS.Spacing.md
@@ -776,43 +551,6 @@ struct HeroCard: ViewModifier {
                 RoundedRectangle(cornerRadius: DS.Radius.xl, style: .continuous)
                     .stroke(DS.Colors.border, lineWidth: 0.5)
             )
-            .shadow(color: .black.opacity(0.22), radius: 12, x: 0, y: 4)
-    }
-}
-
-/// Specular shimmer overlay — diagonal light sweep across the hero card every
-/// 6 seconds. Per Lucid Design Bundle Tier 3 hero spec. Respects reduce-motion.
-struct SpecularShimmer: View {
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
-
-    var body: some View {
-        if reduceMotion {
-            EmptyView()
-        } else {
-            TimelineView(.animation(minimumInterval: 1.0 / 30.0)) { context in
-                let phase = (context.date.timeIntervalSinceReferenceDate
-                    .truncatingRemainder(dividingBy: 6.0)) / 6.0
-                GeometryReader { geo in
-                    LinearGradient(
-                        stops: [
-                            .init(color: .clear, location: 0.0),
-                            .init(color: DS.Colors.shimmer.opacity(0.08), location: 0.48),
-                            .init(color: DS.Colors.shimmer.opacity(0.16), location: 0.50),
-                            .init(color: DS.Colors.shimmer.opacity(0.08), location: 0.52),
-                            .init(color: .clear, location: 1.0)
-                        ],
-                        startPoint: .topLeading,
-                        endPoint: .bottomTrailing
-                    )
-                    .frame(width: geo.size.width * 0.45)
-                    .offset(x: -geo.size.width + (geo.size.width * 2.45 * CGFloat(phase)))
-                    .blendMode(.plusLighter)
-                    .allowsHitTesting(false)
-                }
-                .clipShape(RoundedRectangle(cornerRadius: DS.Radius.xl, style: .continuous))
-                .opacity(0.55)
-            }
-        }
     }
 }
 
@@ -869,38 +607,6 @@ struct SectionHeader: View {
     }
 }
 
-// MARK: - Stat Pill
-
-struct StatPill: View {
-    let icon: String
-    let value: String
-    var unit: String = ""
-    var color: Color = DS.Colors.textSecondary
-
-    var body: some View {
-        HStack(spacing: 4) {
-            Image(systemName: icon)
-                .font(.system(size: 9))
-                .foregroundStyle(color.opacity(0.7))
-            Text(value)
-                .font(.system(size: 11, weight: .semibold, design: .rounded))
-                .foregroundStyle(color)
-            if !unit.isEmpty {
-                Text(unit)
-                    .font(.system(size: 9))
-                    .foregroundStyle(color.opacity(0.6))
-            }
-        }
-        .padding(.horizontal, 10)
-        .padding(.vertical, 5)
-        .background(color.opacity(0.08))
-        .overlay(
-            Capsule().stroke(color.opacity(0.15), lineWidth: 0.5)
-        )
-        .clipShape(Capsule())
-    }
-}
-
 // MARK: - Score Ring (Recovery / Sleep / Strain hero display)
 
 struct ScoreRing: View {
@@ -915,7 +621,7 @@ struct ScoreRing: View {
         ZStack {
             // Track
             Circle()
-                .stroke(color.opacity(0.12), lineWidth: lineWidth)
+                .stroke(DS.Colors.track, lineWidth: lineWidth)
 
             // Progress
             Circle()

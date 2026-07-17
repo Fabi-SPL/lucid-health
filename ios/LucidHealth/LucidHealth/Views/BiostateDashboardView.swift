@@ -222,26 +222,31 @@ struct BiostateDashboardView: View {
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(.vertical, 30)
             } else {
+                // Day-bucketed band — one min–max range bar + a mean dot per day
+                // instead of ~670 raw 15-min samples drawn as spaghetti.
                 Chart {
-                    if graphMetric == .arousal, let f = graphPoints.first?.date, let l = graphPoints.last?.date {
+                    if graphMetric == .arousal, let f = dayBuckets.first?.day, let l = dayBuckets.last?.day {
                         RectangleMark(
-                            xStart: .value("s", f), xEnd: .value("e", l),
+                            xStart: .value("s", f), xEnd: .value("e", Calendar.current.date(byAdding: .day, value: 1, to: l) ?? l),
                             yStart: .value("lo", 4.0), yEnd: .value("hi", 6.0)
                         )
                         .foregroundStyle(DS.Colors.violet.opacity(0.06))
                     }
-                    ForEach(graphPoints) { pt in
-                        LineMark(x: .value("t", pt.date), y: .value("v", pt.value))
-                            .interpolationMethod(graphMetric == .drunk ? .stepCenter : .catmullRom)
-                            .lineStyle(StrokeStyle(lineWidth: 2, lineCap: .round))
-                            .foregroundStyle(
-                                LinearGradient(colors: [graphTint.opacity(0.85), graphTint],
-                                               startPoint: .leading, endPoint: .trailing)
-                            )
-                        if pt.id == graphPoints.last?.id {
-                            PointMark(x: .value("t", pt.date), y: .value("v", pt.value))
-                                .symbolSize(34).foregroundStyle(graphTint)
-                        }
+                    ForEach(dayBuckets) { b in
+                        BarMark(
+                            x: .value("day", b.day, unit: .day),
+                            yStart: .value("min", b.min),
+                            yEnd: .value("max", max(b.max, b.min + yNudge)),
+                            width: .ratio(0.45)
+                        )
+                        .foregroundStyle(graphTint.opacity(0.22))
+                        .cornerRadius(4)
+                        PointMark(
+                            x: .value("day", b.day, unit: .day),
+                            y: .value("mean", b.mean)
+                        )
+                        .symbolSize(42)
+                        .foregroundStyle(graphTint)
                     }
                 }
                 .chartYScale(domain: yDomain)
@@ -251,6 +256,7 @@ struct BiostateDashboardView: View {
                 } }
                 .frame(height: 180)
                 .padding(.top, DS.Spacing.xs)
+                .accessibilityLabel("Last 7 days of \(graphMetric.rawValue): daily range bands with mean dots")
             }
         }
         .padding(DS.Spacing.md)
@@ -305,6 +311,33 @@ struct BiostateDashboardView: View {
             guard let vv = v else { return nil }
             return GraphPoint(id: p.id, date: d, value: vv)
         }
+    }
+
+    private struct DayBucket: Identifiable {
+        let day: Date
+        let min: Double
+        let max: Double
+        let mean: Double
+        var id: Date { day }
+    }
+
+    /// Minimum band height so a flat day still draws a visible pill.
+    private var yNudge: Double {
+        (yDomain.upperBound - yDomain.lowerBound) * 0.02
+    }
+
+    private var dayBuckets: [DayBucket] {
+        let grouped = Dictionary(grouping: graphPoints) { Calendar.current.startOfDay(for: $0.date) }
+        return grouped.map { day, pts in
+            let vals = pts.map(\.value)
+            return DayBucket(
+                day: day,
+                min: vals.min() ?? 0,
+                max: vals.max() ?? 0,
+                mean: vals.reduce(0, +) / Double(vals.count)
+            )
+        }
+        .sorted { $0.day < $1.day }
     }
 
     private var yDomain: ClosedRange<Double> {
