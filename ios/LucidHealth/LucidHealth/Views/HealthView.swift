@@ -9,6 +9,7 @@ struct HealthView: View {
     @EnvironmentObject private var bleManager: BLEManager
     @State private var appeared = false
     @State private var showSleepAdjust = false
+    @State private var showResearchMetrics = false
     @State private var recoveryTrend: [Double] = []
 
     private var engine: HealthEngine { bleManager.healthEngine }
@@ -19,11 +20,8 @@ struct HealthView: View {
                 LazyVStack(spacing: DS.Spacing.lg) {
                     Color.clear.frame(height: DS.Spacing.sm)
 
-                    // FORMAT: PILLS — quick actions (Sleep adjust)
-                    quickActionsRow
-                        .padding(.horizontal, DS.Spacing.md)
-
-                    // FORMAT: HERO — Body Battery, the master spine
+                    // Story order: battery spine → the systems that feed it.
+                    // Page opens on the hero — zero controls above it.
                     bodyBatteryHeroSection
                         .staggerIn(appeared: appeared, index: 0)
 
@@ -31,24 +29,19 @@ struct HealthView: View {
                     liveNowSection
                         .staggerIn(appeared: appeared, index: 1)
 
-                    // FORMAT: BAR — recovery breakdown
+                    // FORMAT: BAR — recovery breakdown + trend + forecast (one cluster)
                     recoveryBreakdownSection
-                        .staggerIn(appeared: appeared, index: 1)
-
-                    // FORMAT: CHART — HRV trend sparkline (RMSSD headline only)
-                    hrvTrendSection
                         .staggerIn(appeared: appeared, index: 2)
 
-                    // Tomorrow, foretold — recovery forecast + self-grading (moved off Today).
                     TomorrowForetoldCard(actualRecoveryToday: engine.recoveryScore)
                         .padding(.horizontal, DS.Spacing.md)
+                        .staggerIn(appeared: appeared, index: 2)
+
+                    // FORMAT: CHART — HRV trend (research metrics behind disclosure)
+                    hrvTrendSection
                         .staggerIn(appeared: appeared, index: 3)
 
-                    // FORMAT: COMPACT TILES — research metrics (SDNN / pNN50 / DFA α1)
-                    researchMetricsSection
-                        .staggerIn(appeared: appeared, index: 3)
-
-                    // FORMAT: STACKED BAR + TILES — sleep
+                    // FORMAT: STACKED BAR + TILES — sleep (score + details + adjust)
                     sleepSection
                         .staggerIn(appeared: appeared, index: 4)
 
@@ -59,12 +52,12 @@ struct HealthView: View {
                     // FORMAT: GAUGE (conditional) — illness signals
                     if engine.illnessRisk > 0 || engine.lastAlcoholImpact > 10 {
                         illnessSection
-                            .staggerIn(appeared: appeared, index: 7)
+                            .staggerIn(appeared: appeared, index: 6)
                     }
 
-                    // FORMAT: ROWS — device diagnostics
-                    deviceSection
-                        .staggerIn(appeared: appeared, index: 8)
+                    // One-line device strip — telemetry lives in Settings → Diagnostics
+                    deviceStrip
+                        .staggerIn(appeared: appeared, index: 7)
 
                     Color.clear.frame(height: 100)
                 }
@@ -93,80 +86,14 @@ struct HealthView: View {
         }
     }
 
-    // MARK: - Quick Actions Row (Timeline + Sleep adjust + I'm awake)
-
-    /// v98 — Show "I'm awake" only while a sleep session is unfinished.
-    /// Once sleep score has been computed (sleepEndTime set) the button hides.
-    private var canManualWake: Bool {
-        engine.sleepDetected || (engine.sleepStartTime != nil && engine.sleepEndTime == nil)
-    }
-
-    @ViewBuilder
-    private var quickActionsRow: some View {
-        HStack(spacing: DS.Spacing.sm) {
-            // v98 — manual wake-up safety net. Only visible when a sleep session
-            // is in progress. Tap forces markSleepEnd + computeRecovery + locks
-            // sleep state until 9pm. Solves the Fabi-pattern miss where his
-            // chronic-low baseline keeps HR-driven wake detection from firing.
-            if canManualWake {
-                Button {
-                    DS.Haptic.success()
-                    engine.manualWakeUp()
-                } label: {
-                    Label("I'm awake", systemImage: "sun.max.fill")
-                        .font(.system(size: 13, weight: .semibold, design: .rounded))
-                        .foregroundStyle(DS.Colors.amber)
-                        .padding(.horizontal, DS.Spacing.md)
-                        .padding(.vertical, DS.Spacing.sm)
-                        .frame(maxWidth: .infinity)
-                        .background(
-                            Capsule()
-                                .fill(DS.Colors.amber.opacity(0.10))
-                                .overlay(Capsule().stroke(DS.Colors.amber.opacity(0.25), lineWidth: 0.5))
-                        )
-                }
-                .buttonStyle(.plain)
-            }
-
-            Button {
-                DS.Haptic.tap()
-                showSleepAdjust = true
-            } label: {
-                Label("Adjust sleep", systemImage: "moon.zzz.fill")
-                    .font(.system(size: 13, weight: .semibold, design: .rounded))
-                    .foregroundStyle(DS.Colors.violet)
-                    .padding(.horizontal, DS.Spacing.md)
-                    .padding(.vertical, DS.Spacing.sm)
-                    .frame(maxWidth: .infinity)
-                    .background(
-                        Capsule()
-                            .fill(DS.Colors.violet.opacity(0.10))
-                            .overlay(Capsule().stroke(DS.Colors.violet.opacity(0.25), lineWidth: 0.5))
-                    )
-            }
-            .buttonStyle(.plain)
-        }
-    }
-
     // MARK: - 1. Live Now (FORMAT: ROW — bigger than Today's version)
 
     @ViewBuilder
     private var liveNowSection: some View {
         VStack(alignment: .leading, spacing: DS.Spacing.md) {
-            HStack(spacing: DS.Spacing.sm) {
-                SectionHeader(icon: "waveform.path.ecg", title: "LIVE NOW", iconColor: DS.Colors.teal)
-                AmbientLiveDot(
-                    state: bleManager.connectionState == .connected ? .connected
-                        : (bleManager.connectionState == .scanning ? .scanning : .disconnected)
-                )
-                Spacer()
-                // HRV mini ring alongside live section
-                if engine.currentRMSSD > 0 && !engine.baselineRMSSD.isEmpty {
-                    let baseline = engine.baselineRMSSD.reduce(0, +) / Double(engine.baselineRMSSD.count)
-                    HRVRingMini(today: engine.currentRMSSD, baseline: baseline)
-                }
-            }
-            .padding(.horizontal, DS.Spacing.md)
+            // One connection indicator app-wide (hero header dot); one header grammar (no icons).
+            SectionHeader(title: "LIVE NOW")
+                .padding(.horizontal, DS.Spacing.md)
 
             // Tighter 4-cell live row — battery/RSSI/FW moved to Settings → Diagnostics
             // (lucid-design: kill duplicates from Today, focal numbers belong on the headline)
@@ -315,38 +242,42 @@ struct HealthView: View {
                             .foregroundStyle(DS.Colors.textFaint)
                     }
                 }
+
+                // Research metrics (SDNN / pNN50 / DFA α1) — same system, so they
+                // live inside the HRV card, behind a disclosure.
+                if engine.sdnn > 0 || engine.pnn50 > 0 || engine.dfaAlpha1 > 0 {
+                    Button {
+                        withAnimation(.spring(response: 0.35, dampingFraction: 0.85)) {
+                            showResearchMetrics.toggle()
+                        }
+                    } label: {
+                        HStack(spacing: 5) {
+                            Text("Research metrics")
+                                .font(.system(size: 11, weight: .semibold, design: .rounded))
+                                .foregroundStyle(DS.Colors.textMuted)
+                            Image(systemName: "chevron.down")
+                                .font(.system(size: 9, weight: .semibold))
+                                .foregroundStyle(DS.Colors.textFaint)
+                                .rotationEffect(.degrees(showResearchMetrics ? 180 : 0))
+                            Spacer()
+                        }
+                    }
+                    .buttonStyle(.plain)
+
+                    if showResearchMetrics {
+                        let cols = [GridItem(.flexible()), GridItem(.flexible()), GridItem(.flexible())]
+                        LazyVGrid(columns: cols, spacing: DS.Spacing.sm) {
+                            MetricTile(label: "SDNN",   value: engine.sdnn > 0 ? "\(Int(engine.sdnn))" : "—",     unit: "ms", color: DS.Colors.teal)
+                            MetricTile(label: "pNN50",  value: engine.pnn50 > 0 ? String(format: "%.1f", engine.pnn50) : "—", unit: "%",  color: DS.Colors.violet)
+                            MetricTile(label: "DFA α1", value: engine.dfaAlpha1 > 0 ? String(format: "%.2f", engine.dfaAlpha1) : "—", unit: "α", color: DS.Colors.amber)
+                        }
+                        .transition(.opacity)
+                    }
+                }
             }
             .padding(DS.Spacing.lg)
             .glassDefault()
             .padding(.horizontal, DS.Spacing.md)
-        }
-    }
-
-    // MARK: - 3b. Research Metrics (FORMAT: COMPACT TILES — separated from headline)
-    // SDNN / pNN50 / DFA α1 split out to its own card so the HRV Trend hero
-    // doesn't compete with itself. lucid-design: format diversity = each card
-    // earns its own visual role.
-
-    @ViewBuilder
-    private var researchMetricsSection: some View {
-        if engine.sdnn > 0 || engine.pnn50 > 0 || engine.dfaAlpha1 > 0 {
-            VStack(alignment: .leading, spacing: DS.Spacing.sm) {
-                HStack(spacing: DS.Spacing.sm) {
-                    CategoryDot(category: .mind)
-                    SectionHeader(title: "RESEARCH METRICS")
-                }
-                .padding(.horizontal, DS.Spacing.md)
-
-                let cols = [GridItem(.flexible()), GridItem(.flexible()), GridItem(.flexible())]
-                LazyVGrid(columns: cols, spacing: DS.Spacing.sm) {
-                    MetricTile(label: "SDNN",   value: engine.sdnn > 0 ? "\(Int(engine.sdnn))" : "—",     unit: "ms", color: DS.Colors.teal)
-                    MetricTile(label: "pNN50",  value: engine.pnn50 > 0 ? String(format: "%.1f", engine.pnn50) : "—", unit: "%",  color: DS.Colors.violet)
-                    MetricTile(label: "DFA α1", value: engine.dfaAlpha1 > 0 ? String(format: "%.2f", engine.dfaAlpha1) : "—", unit: "α", color: DS.Colors.amber)
-                }
-                .padding(DS.Spacing.md)
-                .glassSubtle()
-                .padding(.horizontal, DS.Spacing.md)
-            }
         }
     }
 
@@ -358,6 +289,24 @@ struct HealthView: View {
             HStack(spacing: DS.Spacing.sm) {
                 CategoryDot(category: .sleep)
                 SectionHeader(title: "SLEEP LAST NIGHT")
+                Spacer()
+                // Adjust lives on the sleep card it edits (was a floating pill row).
+                Button {
+                    DS.Haptic.tap()
+                    showSleepAdjust = true
+                } label: {
+                    HStack(spacing: 3) {
+                        Image(systemName: "moon.zzz.fill")
+                            .font(.system(size: 9, weight: .semibold))
+                        Text("Adjust")
+                            .font(.system(size: 11, weight: .semibold, design: .rounded))
+                    }
+                    .foregroundStyle(DS.Colors.violet)
+                    .padding(.horizontal, 9)
+                    .padding(.vertical, 4)
+                    .background(Capsule().fill(DS.Colors.violet.opacity(0.10)))
+                }
+                .buttonStyle(.plain)
             }
             .padding(.horizontal, DS.Spacing.md)
 
@@ -448,17 +397,12 @@ struct HealthView: View {
                     }
                 }
 
-            }
-            .padding(DS.Spacing.lg)
-            .glassDefault()
-            .padding(.horizontal, DS.Spacing.md)
-
-            // Sleep details — separate compact card. lucid-design: format diversity =
-            // give detail tiles their own visual role instead of stuffing them
-            // under the score+stages.
-            if hasSleepDetails {
-                VStack(alignment: .leading, spacing: DS.Spacing.sm) {
-                    SectionHeader(title: "SLEEP DETAILS", iconColor: DS.Colors.textFaint)
+                // Details ride in the same card — one sleep story, not two boxes.
+                if hasSleepDetails {
+                    Rectangle()
+                        .fill(DS.Colors.border.opacity(0.4))
+                        .frame(height: 0.5)
+                        .padding(.vertical, 2)
 
                     let cols = [GridItem(.flexible()), GridItem(.flexible())]
                     LazyVGrid(columns: cols, spacing: DS.Spacing.sm) {
@@ -484,10 +428,10 @@ struct HealthView: View {
                         }
                     }
                 }
-                .padding(DS.Spacing.md)
-                .glassSubtle()
-                .padding(.horizontal, DS.Spacing.md)
             }
+            .padding(DS.Spacing.lg)
+            .glassDefault()
+            .padding(.horizontal, DS.Spacing.md)
         }
     }
 
@@ -667,7 +611,7 @@ struct HealthView: View {
         VStack(alignment: .leading, spacing: DS.Spacing.md) {
             HStack(spacing: DS.Spacing.sm) {
                 CategoryDot(category: .care)
-                SectionHeader(title: "HEALTH SIGNALS", iconColor: DS.Colors.amber)
+                SectionHeader(title: "SIGNALS")
             }
             .padding(.horizontal, DS.Spacing.md)
 
@@ -708,53 +652,42 @@ struct HealthView: View {
         }
     }
 
-    // MARK: - 8. Device (FORMAT: ROWS)
+    // MARK: - 8. Device strip (one line — telemetry ≠ health data)
+    // Full telemetry (battery, readings, sync points, RSSI) → Settings → Diagnostics.
 
     @ViewBuilder
-    private var deviceSection: some View {
-        VStack(alignment: .leading, spacing: DS.Spacing.md) {
-            SectionHeader(icon: "antenna.radiowaves.left.and.right", title: "DEVICE", iconColor: DS.Colors.textFaint)
-                .padding(.horizontal, DS.Spacing.md)
-
-            VStack(alignment: .leading, spacing: DS.Spacing.sm) {
-                HStack {
-                    BLEStatusDot()
-                        .environmentObject(bleManager)
-                    Spacer()
-                    if bleManager.isWorn {
-                        GlassStatusPill(icon: "figure.walk", text: "Worn", color: DS.Colors.teal)
-                    }
-                    if bleManager.isCharging {
-                        GlassStatusPill(icon: "bolt.fill", text: "Charging", color: DS.Colors.amber)
-                    }
-                }
-
-                let cols = [GridItem(.flexible()), GridItem(.flexible()), GridItem(.flexible())]
-                LazyVGrid(columns: cols, spacing: DS.Spacing.sm) {
-                    MetricTile(label: "BATTERY",
-                               value: bleManager.battery > 0 ? "\(Int(bleManager.battery))" : "—",
-                               unit: "%",
-                               color: bleManager.battery < 20 ? DS.Colors.pink : DS.Colors.teal)
-                    MetricTile(label: "READINGS",
-                               value: "\(bleManager.readingsToday)",
-                               unit: "today",
-                               color: DS.Colors.violet)
-                    MetricTile(label: "SYNC",
-                               value: "\(bleManager.historySyncCount)",
-                               unit: "points",
-                               color: DS.Colors.textSecondary)
-                }
-
-                if let lastSync = bleManager.lastSync {
-                    InfoRow(icon: "arrow.clockwise", label: "Last sync",
-                            value: lastSync.formatted(.dateTime.hour().minute().second()),
-                            color: DS.Colors.textFaint)
-                }
+    private var deviceStrip: some View {
+        HStack(spacing: DS.Spacing.sm) {
+            Image(systemName: "antenna.radiowaves.left.and.right")
+                .font(.system(size: 11))
+                .foregroundStyle(DS.Colors.textFaint)
+            Text(deviceStripLabel)
+                .font(.system(size: 12, weight: .medium, design: .rounded))
+                .foregroundStyle(DS.Colors.textSecondary)
+            Spacer()
+            if bleManager.isCharging {
+                GlassStatusPill(icon: "bolt.fill", text: "Charging", color: DS.Colors.amber)
             }
-            .padding(DS.Spacing.md)
-            .glassDefault()
-            .padding(.horizontal, DS.Spacing.md)
+            if bleManager.battery > 0 {
+                Text("\(Int(bleManager.battery))%")
+                    .font(.system(size: 11, weight: .semibold, design: .rounded))
+                    .foregroundStyle(bleManager.battery < 20 ? DS.Colors.pink : DS.Colors.textFaint)
+                    .monospacedDigit()
+            }
         }
+        .padding(.horizontal, DS.Spacing.md)
+        .padding(.vertical, DS.Spacing.sm)
+        .glassSubtle()
+        .padding(.horizontal, DS.Spacing.md)
+    }
+
+    private var deviceStripLabel: String {
+        let state = bleManager.connectionState == .connected ? "strap live" : "strap"
+        if let last = bleManager.lastSync {
+            let m = Int(-last.timeIntervalSinceNow / 60)
+            return m < 1 ? "\(state) · synced now" : "\(state) · synced \(m)m ago"
+        }
+        return state
     }
 
     // MARK: - Helpers
@@ -796,17 +729,6 @@ struct HealthView: View {
         case .light: return "Light"
         case .deep:  return "Deep"
         case .rem:   return "REM"
-        }
-    }
-
-    private var batteryIcon: String {
-        let b = Int(bleManager.battery)
-        if bleManager.isCharging { return "battery.100.bolt" }
-        switch b {
-        case 75...: return "battery.100"
-        case 50...: return "battery.75"
-        case 25...: return "battery.50"
-        default:    return "battery.25"
         }
     }
 
@@ -857,15 +779,18 @@ private struct TomorrowForetoldCard: View {
                         .foregroundStyle(DS.Colors.textMuted)
 
                     if let v = verdict {
-                        HStack(spacing: 7) {
+                        // Hit/miss badge + delta — the old sentence said the same thing in 14 words.
+                        HStack(spacing: 5) {
                             Image(systemName: v.hit ? "checkmark.seal.fill" : "xmark.seal.fill")
-                                .font(.system(size: 12, weight: .bold))
-                                .foregroundStyle(v.hit ? DS.Colors.success : DS.Colors.amber)
+                                .font(.system(size: 11, weight: .bold))
                             Text(v.text)
-                                .font(.system(size: 13, weight: .semibold, design: .rounded))
-                                .foregroundStyle(DS.Colors.textSecondary)
-                                .fixedSize(horizontal: false, vertical: true)
+                                .font(.system(size: 12, weight: .semibold, design: .rounded))
+                                .monospacedDigit()
                         }
+                        .foregroundStyle(v.hit ? DS.Colors.success : DS.Colors.amber)
+                        .padding(.horizontal, 9)
+                        .padding(.vertical, 4)
+                        .background(Capsule().fill((v.hit ? DS.Colors.success : DS.Colors.amber).opacity(0.10)))
                     }
 
                     if let t = tomorrow, let p50 = t.recoveryP50 {
@@ -910,10 +835,11 @@ private struct TomorrowForetoldCard: View {
         let todayKey = "aura_fc_\(Self.fmt.string(from: Date()))"
         if UserDefaults.standard.object(forKey: todayKey) != nil, actualRecoveryToday > 0 {
             let predicted = UserDefaults.standard.double(forKey: todayKey)
-            let hit = abs(predicted - actualRecoveryToday) <= 8
+            let delta = Int((actualRecoveryToday - predicted).rounded())
+            let hit = abs(delta) <= 8
             let text = hit
-                ? "Called it — I bet \(Int(predicted)), you woke at \(Int(actualRecoveryToday))."
-                : "Off this time — I bet \(Int(predicted)), you came in at \(Int(actualRecoveryToday))."
+                ? "Called it · \(delta >= 0 ? "+" : "")\(delta)"
+                : "Off by \(abs(delta))"
             await MainActor.run { verdict = (text, hit) }
         }
     }

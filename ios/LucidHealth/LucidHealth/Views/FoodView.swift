@@ -12,7 +12,6 @@ struct FoodView: View {
     @State private var favorites: [FoodFavorite] = []
     @State private var isLoading = false
     @State private var error: String?
-    @State private var filter: FoodFilter = .all
     @State private var showCamera = false
     @State private var showBarcode = false
     @State private var showManual = false
@@ -26,15 +25,6 @@ struct FoodView: View {
     @State private var editing: FoodEntry?
     @State private var detailEntry: FoodEntry?
     @State private var quickEdit: QuickLogSource?
-
-    private var filtered: [FoodEntry] {
-        switch filter {
-        case .all:     return entries
-        case .photo:   return entries.filter { $0.source == "photo" }
-        case .barcode: return entries.filter { $0.source == "barcode" }
-        case .quick:   return entries.filter { $0.source == "quick_tag" || $0.source == "quick_log" }
-        }
-    }
 
     private var todayEntries: [FoodEntry] { entries.filter(isToday) }
     private var todayKcal: Int { entries.filter(isToday).compactMap(\.totalKcal).reduce(0, +) }
@@ -98,56 +88,38 @@ struct FoodView: View {
                 // Top-of-list sections — explicit per-row .padding(.top:) because
                 // listRowInsets(EdgeInsets()) + defaultMinListRowHeight 0 kill
                 // SwiftUI's native row spacing. Without this they squish flush.
-                // Spacing rhythm is intentional:
-                //   • Bento — sm above (just under the toolbar)
-                //   • Quality — md (related to bento, tighter cluster)
-                //   • Fasting — lg (separate concern, more breathing)
-                //   • Filter — lg (control affordance, transitions into the list)
+                // Order: the logging tab leads with logging (quick log first),
+                // then the hero (meal count + fast docked in its header), then
+                // one merged Food-quality card. Bento + filter row are gone —
+                // 3 of 4 bento tiles repeated adjacent cards, and the filter's
+                // manual/text sources were unreachable.
                 Section {
-                    FoodIntakeHero(
-                        kcal: todayKcal,
-                        protein: todayProtein,
-                        carbs: todayCarbs,
-                        fat: todayFat
-                    )
-                    .padding(.horizontal, DS.Spacing.md)
-                    .padding(.top, DS.Spacing.sm)
-                    .listRowInsets(EdgeInsets())
-                    .listRowBackground(Color.clear)
-                    .listRowSeparator(.hidden)
-
-                    TodayBentoRow(
-                        kcal: todayKcal,
-                        mindAvg: todayMindAvg,
-                        novaAvg: todayNovaAvg,
-                        mealCount: todayEntries.count
-                    )
-                    .padding(.horizontal, DS.Spacing.md)
-                    .padding(.top, DS.Spacing.md)
-                    .listRowInsets(EdgeInsets())
-                    .listRowBackground(Color.clear)
-                    .listRowSeparator(.hidden)
-
                     FavoritesBar(
                         favorites: favorites,
                         onLog: { item in quickEdit = .preset(item) },
                         onLogFavorite: { fav in quickEdit = .favorite(fav) }
                     )
+                    .padding(.top, DS.Spacing.sm)
+                    .listRowInsets(EdgeInsets())
+                    .listRowBackground(Color.clear)
+                    .listRowSeparator(.hidden)
+
+                    FoodIntakeHero(
+                        kcal: todayKcal,
+                        protein: todayProtein,
+                        carbs: todayCarbs,
+                        fat: todayFat,
+                        mealCount: todayEntries.count,
+                        fastingHours: hoursSinceLastMeal
+                    )
+                    .padding(.horizontal, DS.Spacing.md)
                     .padding(.top, DS.Spacing.md)
                     .listRowInsets(EdgeInsets())
                     .listRowBackground(Color.clear)
                     .listRowSeparator(.hidden)
 
                     if !todayEntries.isEmpty {
-                        FoodQualityRow(entries: todayEntries)
-                            .padding(.top, DS.Spacing.md)
-                            .listRowInsets(EdgeInsets())
-                            .listRowBackground(Color.clear)
-                            .listRowSeparator(.hidden)
-                    }
-
-                    if !todayEntries.isEmpty {
-                        MindMeterCard(score: todayMindAvg, tags: todayMindTags)
+                        FoodQualityCard(entries: todayEntries, score: todayMindAvg, tags: todayMindTags)
                             .padding(.horizontal, DS.Spacing.md)
                             .padding(.top, DS.Spacing.md)
                             .listRowInsets(EdgeInsets())
@@ -163,22 +135,6 @@ struct FoodView: View {
                             .listRowBackground(Color.clear)
                             .listRowSeparator(.hidden)
                     }
-
-                    if let hours = hoursSinceLastMeal {
-                        FastingTrackerChip(hours: hours)
-                            .padding(.horizontal, DS.Spacing.md)
-                            .padding(.top, DS.Spacing.lg)
-                            .listRowInsets(EdgeInsets())
-                            .listRowBackground(Color.clear)
-                            .listRowSeparator(.hidden)
-                    }
-
-                    FilterChipRow(selected: $filter)
-                        .padding(.top, DS.Spacing.lg)
-                        .padding(.bottom, DS.Spacing.sm)
-                        .listRowInsets(EdgeInsets())
-                        .listRowBackground(Color.clear)
-                        .listRowSeparator(.hidden)
                 }
 
                 entriesContent
@@ -268,6 +224,8 @@ struct FoodView: View {
                     entries[idx] = updated
                 }
             }
+            .presentationDetents([.medium, .large])
+            .presentationDragIndicator(.visible)
         }
         .sheet(item: $quickEdit) { source in
             QuickLogEditorSheet(
@@ -314,20 +272,18 @@ struct FoodView: View {
                 .listRowInsets(EdgeInsets())
                 .listRowBackground(Color.clear)
                 .listRowSeparator(.hidden)
-        } else if filtered.isEmpty {
+        } else if entries.isEmpty {
             EmptyGlassState(
                 icon: "fork.knife",
                 title: "Nothing logged yet",
-                detail: filter == .all
-                    ? "Tap + to start."
-                    : "No entries for this filter."
+                detail: "Tap + to start."
             )
             .padding(DS.Spacing.md)
             .listRowInsets(EdgeInsets())
             .listRowBackground(Color.clear)
             .listRowSeparator(.hidden)
         } else {
-            let grouped = Dictionary(grouping: filtered) { entry in
+            let grouped = Dictionary(grouping: entries) { entry in
                 Calendar.current.startOfDay(for: entry.capturedAt)
             }
             let sortedDays = grouped.keys.sorted(by: >)
@@ -372,6 +328,8 @@ struct FoodView: View {
                                 } label: {
                                     Label("Delete", systemImage: "trash")
                                 }
+                            } preview: {
+                                MealPeekPreview(entry: entry)
                             }
                     }
                 } header: {
@@ -448,49 +406,6 @@ struct FoodView: View {
         }
     }
 
-}
-
-// MARK: - Filter
-
-enum FoodFilter: String, CaseIterable {
-    case all     = "All"
-    case photo   = "Photo"
-    case barcode = "Barcode"
-    case quick   = "Quick"
-}
-
-private struct FilterChipRow: View {
-    @Binding var selected: FoodFilter
-
-    var body: some View {
-        ScrollView(.horizontal, showsIndicators: false) {
-            HStack(spacing: DS.Spacing.sm) {
-                ForEach(FoodFilter.allCases, id: \.self) { f in
-                    Button {
-                        DS.Haptic.select()
-                        withAnimation(DS.Anim.quick) { selected = f }
-                    } label: {
-                        Text(f.rawValue)
-                            .font(.system(size: 12, weight: selected == f ? .semibold : .medium, design: .rounded))
-                            .foregroundStyle(selected == f ? DS.Colors.violet : DS.Colors.textFaint)
-                            .padding(.horizontal, DS.Spacing.md)
-                            .padding(.vertical, 6)
-                            .background(
-                                Capsule()
-                                    .fill(selected == f ? DS.Colors.violet.opacity(0.12) : DS.Colors.surface)
-                                    .overlay(
-                                        Capsule()
-                                            .stroke(selected == f ? DS.Colors.violet.opacity(0.3) : DS.Colors.border, lineWidth: 0.5)
-                                    )
-                            )
-                    }
-                    .buttonStyle(.plain)
-                }
-            }
-            .padding(.horizontal, DS.Spacing.md)
-            .padding(.vertical, DS.Spacing.xs)
-        }
-    }
 }
 
 // MARK: - Favorites Bar (one-tap quick log, most-used first)
@@ -571,44 +486,6 @@ private struct FavoritePill: View {
     }
 }
 
-// MARK: - Today Bento Row (4-tile MetricTile grid)
-
-private struct TodayBentoRow: View {
-    let kcal: Int
-    let mindAvg: Double
-    let novaAvg: Double
-    let mealCount: Int
-
-    var body: some View {
-        HStack(spacing: DS.Spacing.sm) {
-            MetricTile(
-                label: "KCAL",
-                value: kcal > 0 ? "\(kcal)" : "—",
-                unit: "",
-                color: DS.Colors.amber
-            )
-            MetricTile(
-                label: "BRAIN Ø",
-                value: mindAvg > 0 ? String(format: "%.1f", mindAvg) : "—",
-                unit: "/15",
-                color: DS.Colors.mindColor(mindAvg)
-            )
-            MetricTile(
-                label: "NOVA Ø",
-                value: novaAvg > 0 ? String(format: "%.1f", novaAvg) : "—",
-                unit: "",
-                color: DS.Colors.novaColor(novaAvg)
-            )
-            MetricTile(
-                label: "TODAY",
-                value: "\(mealCount)",
-                unit: "meals",
-                color: DS.Colors.violet
-            )
-        }
-    }
-}
-
 // MARK: - Food Intake Hero (Aurora macro donut + legend — matches v5 mockup)
 
 private struct FoodIntakeHero: View {
@@ -616,6 +493,8 @@ private struct FoodIntakeHero: View {
     let protein: Double
     let carbs: Double
     let fat: Double
+    let mealCount: Int
+    let fastingHours: Int?
 
     private var pCal: Double { protein * 4 }
     private var cCal: Double { carbs * 4 }
@@ -623,13 +502,26 @@ private struct FoodIntakeHero: View {
     private var total: Double { max(pCal + cCal + fCal, 1) }
     private var hasData: Bool { protein + carbs + fat > 0 }
 
+    private var headerStat: String {
+        var parts = ["\(mealCount) meal\(mealCount == 1 ? "" : "s")"]
+        if let h = fastingHours, h >= 1 { parts.append("\(h)h since last") }
+        return parts.joined(separator: " · ")
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text("Intake & macros")
-                .font(.system(size: 10, weight: .bold))
-                .tracking(1.4)
-                .textCase(.uppercase)
-                .foregroundStyle(DS.Colors.textMuted)
+            HStack {
+                Text("Intake & macros")
+                    .font(.system(size: 10, weight: .bold))
+                    .tracking(1.4)
+                    .textCase(.uppercase)
+                    .foregroundStyle(DS.Colors.textMuted)
+                Spacer()
+                Text(headerStat)
+                    .font(.system(size: 11, weight: .semibold, design: .rounded))
+                    .monospacedDigit()
+                    .foregroundStyle(DS.Colors.textFaint)
+            }
 
             HStack(spacing: 18) {
                 MacroDonut(
@@ -726,10 +618,33 @@ struct CaffeineHit {
     let mg: Double
 }
 
-private struct MindMeterCard: View {
+/// One "Food quality" card — brain-food (MIND) meter + NOVA processing histogram.
+/// Merged from the old MindMeterCard + FoodQualityRow so today's quality story
+/// reads in one place instead of two stacked cards.
+private struct FoodQualityCard: View {
+    let entries: [FoodEntry]
     let score: Double      // 0..15
     let tags: [String]
     private var filled: Int { max(0, min(15, Int(score.rounded()))) }
+
+    private var novaBuckets: [Int] {
+        var counts = [0, 0, 0, 0]  // NOVA 1, 2, 3, 4
+        for entry in entries {
+            for item in entry.items {
+                let idx = max(0, min(3, item.novaClass - 1))
+                counts[idx] += 1
+            }
+        }
+        return counts
+    }
+    private var totalItems: Int { novaBuckets.reduce(0, +) }
+    private var hasAlcohol: Bool {
+        entries.flatMap { $0.items }.contains { $0.mindTags.contains("alcohol") }
+    }
+
+    private func novaColor(_ nova: Int) -> Color {
+        DS.Colors.novaColor(Double(nova))
+    }
 
     private func pretty(_ t: String) -> String {
         t.replacingOccurrences(of: "_", with: " ")
@@ -739,14 +654,23 @@ private struct MindMeterCard: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             HStack {
-                Text("Brain food")
+                Text("Food quality")
                     .font(.system(size: 10, weight: .bold)).tracking(1.4).textCase(.uppercase)
                     .foregroundStyle(DS.Colors.textMuted)
                 Spacer()
+                if hasAlcohol {
+                    Text("Alcohol")
+                        .font(.system(size: 9, weight: .semibold))
+                        .foregroundStyle(DS.Colors.amber)
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 2)
+                        .background(Capsule().fill(DS.Colors.amber.opacity(0.12)))
+                }
                 Text("\(filled)/15")
                     .font(.system(size: 14, weight: .bold, design: .rounded)).monospacedDigit()
                     .foregroundStyle(DS.Colors.violet)
             }
+
             HStack(spacing: 4) {
                 ForEach(0..<15, id: \.self) { i in
                     RoundedRectangle(cornerRadius: 2, style: .continuous)
@@ -757,6 +681,7 @@ private struct MindMeterCard: View {
                         .frame(height: 26)
                 }
             }
+
             if !tags.isEmpty {
                 ScrollView(.horizontal, showsIndicators: false) {
                     HStack(spacing: 6) {
@@ -766,6 +691,43 @@ private struct MindMeterCard: View {
                                 .foregroundStyle(DS.Colors.textSecondary)
                                 .padding(.horizontal, 10).padding(.vertical, 5)
                                 .background(Capsule().fill(DS.Colors.track))
+                        }
+                    }
+                }
+            }
+
+            if totalItems > 0 {
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("NOVA — how processed")
+                        .font(.system(size: 9, weight: .semibold))
+                        .foregroundStyle(DS.Colors.textFaint)
+                        .tracking(1)
+
+                    GeometryReader { geo in
+                        HStack(spacing: 2) {
+                            ForEach(0..<4, id: \.self) { i in
+                                let count = novaBuckets[i]
+                                if count > 0 {
+                                    RoundedRectangle(cornerRadius: 2)
+                                        .fill(novaColor(i + 1))
+                                        .frame(width: max(4, CGFloat(count) / CGFloat(totalItems) * geo.size.width))
+                                }
+                            }
+                        }
+                        .clipShape(RoundedRectangle(cornerRadius: 3))
+                    }
+                    .frame(height: 10)
+
+                    HStack(spacing: DS.Spacing.sm) {
+                        ForEach(0..<4, id: \.self) { i in
+                            if novaBuckets[i] > 0 {
+                                HStack(spacing: 3) {
+                                    Circle().fill(novaColor(i + 1)).frame(width: 6, height: 6)
+                                    Text("N\(i+1): \(novaBuckets[i])")
+                                        .font(.system(size: 9, weight: .medium, design: .monospaced))
+                                        .foregroundStyle(DS.Colors.textFaint)
+                                }
+                            }
                         }
                     }
                 }
@@ -845,40 +807,6 @@ private struct CaffeineCurveCard: View {
     }
 }
 
-// MARK: - Fasting Tracker Chip
-
-private struct FastingTrackerChip: View {
-    let hours: Int
-
-    private var label: String {
-        if hours == 0 { return "Just ate" }
-        if hours == 1 { return "Last meal 1h ago" }
-        return "Last meal \(hours)h ago"
-    }
-
-    private var chipColor: Color {
-        if hours < 3 { return DS.Colors.teal }
-        if hours < 6 { return DS.Colors.amber }
-        return DS.Colors.violet
-    }
-
-    var body: some View {
-        HStack(spacing: DS.Spacing.sm) {
-            CategoryDot(category: .food)
-            Text(label)
-                .font(.system(size: 12, weight: .medium, design: .rounded))
-                .foregroundStyle(chipColor)
-            Spacer()
-            Text("\(hours)h fast")
-                .font(.system(size: 10, weight: .semibold, design: .monospaced))
-                .foregroundStyle(DS.Colors.textFaint)
-        }
-        .padding(.horizontal, DS.Spacing.md)
-        .padding(.vertical, DS.Spacing.sm)
-        .glassDefault()
-    }
-}
-
 // MARK: - Enhanced Meal Card (CategoryDot + StatusChip for NOVA/HRV impact)
 
 private struct EnhancedMealCard: View {
@@ -904,17 +832,6 @@ private struct EnhancedMealCard: View {
         if nova >= 3.5 { return "Ultra-processed" }
         if nova >= 2.5 { return "Processed" }
         return "Minimal"
-    }
-
-    private var logQuality: Int {
-        entry.logQuality ?? FoodEntry.computeLogQuality(source: entry.source, confidence: entry.confidence, items: entry.items)
-    }
-    private var logQualityStyle: StatusChipStyle {
-        switch logQuality {
-        case 8...10: return .teal
-        case 5...7:  return .amber
-        default:     return .danger
-        }
     }
 
     var body: some View {
@@ -956,8 +873,6 @@ private struct EnhancedMealCard: View {
                 }
 
                 Spacer()
-
-                StatusChip(text: "Q\(logQuality)", style: logQualityStyle)
             }
         }
         .padding(DS.Spacing.md)
@@ -965,83 +880,53 @@ private struct EnhancedMealCard: View {
     }
 }
 
-// MARK: - Food Quality Row (NOVA histogram + alcohol)
+// MARK: - Meal Peek (long-press context-menu preview)
 
-private struct FoodQualityRow: View {
-    let entries: [FoodEntry]
-
-    // NOVA bucket counts
-    private var novaBuckets: [Int] {
-        var counts = [0, 0, 0, 0]  // NOVA 1, 2, 3, 4
-        for entry in entries {
-            for item in entry.items {
-                let idx = max(0, min(3, item.novaClass - 1))
-                counts[idx] += 1
-            }
-        }
-        return counts
-    }
-
-    private var totalItems: Int { novaBuckets.reduce(0, +) }
-    private var hasAlcohol: Bool {
-        entries.flatMap { $0.items }.contains { $0.mindTags.contains("alcohol") }
-    }
+private struct MealPeekPreview: View {
+    let entry: FoodEntry
 
     var body: some View {
         VStack(alignment: .leading, spacing: DS.Spacing.sm) {
-            HStack(spacing: 4) {
-                Text("NOVA TODAY")
-                    .font(.system(size: 9, weight: .semibold))
-                    .foregroundStyle(DS.Colors.textFaint)
-                    .tracking(1)
-                if hasAlcohol {
-                    Text("Alcohol")
-                        .font(.system(size: 9, weight: .semibold))
+            Text(entry.caption ?? entry.items.map(\.name).joined(separator: ", "))
+                .font(.system(size: 16, weight: .bold, design: .rounded))
+                .foregroundStyle(DS.Colors.textPrimary)
+            Text(entry.capturedAt.formatted(.dateTime.weekday().hour().minute()))
+                .font(.system(size: 11, weight: .regular, design: .monospaced))
+                .foregroundStyle(DS.Colors.textFaint)
+            HStack(spacing: DS.Spacing.sm) {
+                if let kcal = entry.totalKcal, kcal > 0 {
+                    Label("\(kcal) kcal", systemImage: "flame.fill")
+                        .font(.system(size: 12, weight: .semibold))
                         .foregroundStyle(DS.Colors.amber)
-                        .padding(.horizontal, 5)
-                        .padding(.vertical, 2)
-                        .background(Capsule().fill(DS.Colors.amber.opacity(0.12)))
+                }
+                if let mind = entry.mindScore {
+                    Text("Brain \(mind)/15")
+                        .font(.system(size: 12, weight: .semibold, design: .rounded))
+                        .foregroundStyle(DS.Colors.mindColor(Double(mind)))
                 }
             }
-
-            if totalItems > 0 {
-                HStack(spacing: 2) {
-                    ForEach(0..<4, id: \.self) { i in
-                        let count = novaBuckets[i]
-                        if count > 0 {
-                            RoundedRectangle(cornerRadius: 2)
-                                .fill(novaColor(i + 1))
-                                .frame(width: max(4, CGFloat(count) / CGFloat(totalItems) * 200), height: 10)
-                        }
-                    }
+            ForEach(entry.items.prefix(4)) { item in
+                HStack(spacing: 6) {
+                    Circle().fill(DS.Colors.novaColor(Double(item.novaClass))).frame(width: 6, height: 6)
+                    Text(item.name)
+                        .font(.system(size: 12, weight: .medium))
+                        .foregroundStyle(DS.Colors.textSecondary)
+                        .lineLimit(1)
+                    Spacer()
+                    Text("\(item.kcal) kcal")
+                        .font(.system(size: 10, weight: .medium, design: .monospaced))
+                        .foregroundStyle(DS.Colors.textFaint)
                 }
-                .clipShape(RoundedRectangle(cornerRadius: 3))
-
-                HStack(spacing: DS.Spacing.sm) {
-                    ForEach(0..<4, id: \.self) { i in
-                        if novaBuckets[i] > 0 {
-                            HStack(spacing: 3) {
-                                Circle().fill(novaColor(i + 1)).frame(width: 6, height: 6)
-                                Text("N\(i+1): \(novaBuckets[i])")
-                                    .font(.system(size: 9, weight: .medium, design: .monospaced))
-                                    .foregroundStyle(DS.Colors.textFaint)
-                            }
-                        }
-                    }
-                }
-            } else {
-                Text("No items today")
-                    .font(.system(size: 10))
+            }
+            if entry.items.count > 4 {
+                Text("+ \(entry.items.count - 4) more")
+                    .font(.system(size: 10, weight: .medium))
                     .foregroundStyle(DS.Colors.textFaint)
             }
         }
         .padding(DS.Spacing.md)
-        .glassDefault()
-        .padding(.horizontal, DS.Spacing.md)
-    }
-
-    private func novaColor(_ nova: Int) -> Color {
-        DS.Colors.novaColor(Double(nova))
+        .frame(width: 300, alignment: .leading)
+        .background(DS.Colors.surfaceElevated)
     }
 }
 
@@ -1086,9 +971,10 @@ private struct FoodDetailView: View {
     private var fat: Double? { dblOf(mealTotals?["fat_g_estimate"]) ?? macroSum { $0.fatG } }
     private var fiber: Double? { dblOf(mealTotals?["fiber_g_estimate"]) ?? macroSum { $0.fiberG } }
     private var brainScore: Int? {
-        // Defensive clamp 0-10 — Gemini occasionally returns an unclamped total (e.g. 56).
+        // Defensive clamp 0-15 (MIND scale is /15 app-wide) — Gemini occasionally
+        // returns an unclamped total (e.g. 56).
         guard let s = entry.mindScore ?? intOf(brain?["total"]) else { return nil }
-        return min(10, max(0, s))
+        return min(15, max(0, s))
     }
     private var confidence: String {
         let c = entry.confidence ?? strOf(mealTotals?["confidence_level"]) ?? "—"
@@ -1176,6 +1062,7 @@ private struct FoodDetailView: View {
                     .font(.system(size: 11, weight: .regular, design: .monospaced))
                     .foregroundStyle(DS.Colors.textFaint)
                 StatusChip(text: sourceLabel, style: .violet)
+                StatusChip(text: confidence, style: .teal)
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -1196,9 +1083,6 @@ private struct FoodDetailView: View {
                     .foregroundStyle(DS.Colors.textFaint)
                     .padding(.top, 2)
             }
-            Text("confidence: \(confidence)")
-                .font(.system(size: 10, weight: .medium))
-                .foregroundStyle(DS.Colors.textFaint)
         }
         .frame(maxWidth: .infinity)
         .padding(DS.Spacing.lg)
@@ -1206,11 +1090,13 @@ private struct FoodDetailView: View {
     }
 
     private var macroCard: some View {
+        // Macro color language matches the Food-tab hero legend app-wide:
+        // violet = protein, teal = carbs, amber = fat.
         HStack(spacing: DS.Spacing.sm) {
-            macroTile("Protein", protein, "g", DS.Colors.teal)
-            macroTile("Carbs", carbs, "g", DS.Colors.amber)
-            macroTile("Fat", fat, "g", DS.Colors.pink)
-            macroTile("Fiber", fiber, "g", DS.Colors.violet)
+            macroTile("Protein", protein, "g", DS.Colors.violet)
+            macroTile("Carbs", carbs, "g", DS.Colors.teal)
+            macroTile("Fat", fat, "g", DS.Colors.amber)
+            macroTile("Fiber", fiber, "g", DS.Colors.pink)
         }
     }
 
@@ -1233,7 +1119,7 @@ private struct FoodDetailView: View {
                     .font(.system(size: 22, weight: .heavy, design: .rounded))
                     .foregroundStyle(DS.Colors.mindColor(Double(brainScore ?? 0)))
                     .monospacedDigit()
-                Text("BRAIN").font(.system(size: 9, weight: .bold)).foregroundStyle(DS.Colors.textFaint).tracking(0.8)
+                Text("BRAIN /15").font(.system(size: 9, weight: .bold)).foregroundStyle(DS.Colors.textFaint).tracking(0.8)
             }
             .frame(maxWidth: .infinity)
             Divider().frame(height: 30)
@@ -1276,8 +1162,13 @@ private struct FoodDetailView: View {
                     }
                 }
             } else {
-                Text("Not enough heart-rate data around this meal yet. Wear the strap while resting after eating and this fills in — it shows how much this meal moved your HR (a rough glucose-response stand-in).")
-                    .font(.system(size: 12)).foregroundStyle(DS.Colors.textMuted).fixedSize(horizontal: false, vertical: true)
+                HStack(spacing: 8) {
+                    Image(systemName: "heart.slash")
+                        .font(.system(size: 12))
+                        .foregroundStyle(DS.Colors.textFaint)
+                    Text("No HR read yet — wear the strap after eating")
+                        .font(.system(size: 12)).foregroundStyle(DS.Colors.textMuted)
+                }
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -1290,63 +1181,53 @@ private struct FoodDetailView: View {
         if !entry.items.isEmpty {
             VStack(alignment: .leading, spacing: DS.Spacing.sm) {
                 SectionHeader(icon: "list.bullet", title: "ITEMS", iconColor: DS.Colors.teal)
-                ForEach(entry.items) { item in itemRow(item) }
+                ForEach(entry.items) { item in DetailItemRow(item: item) }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
         }
     }
 
-    private func itemRow(_ item: DetectedItem) -> some View {
-        VStack(alignment: .leading, spacing: 6) {
-            HStack {
-                Text(item.name).font(.system(size: 14, weight: .semibold, design: .rounded)).foregroundStyle(DS.Colors.textPrimary)
+    private var methodNote: some View {
+        // De-prosed: source icon + provenance chip + a 10-segment log-quality
+        // meter replace the old estimation paragraph.
+        VStack(alignment: .leading, spacing: DS.Spacing.sm) {
+            Text("HOW THIS WAS ESTIMATED").font(.system(size: 9, weight: .bold)).foregroundStyle(DS.Colors.textFaint).tracking(0.8)
+            HStack(spacing: DS.Spacing.sm) {
+                Image(systemName: sourceIcon)
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(DS.Colors.violet)
+                Text(sourceLabel)
+                    .font(.system(size: 12, weight: .semibold, design: .rounded))
+                    .foregroundStyle(DS.Colors.textPrimary)
+                StatusChip(text: confidence, style: .teal)
                 Spacer()
-                if item.grams > 0 {
-                    Text("\(item.grams) g").font(.system(size: 11, weight: .medium, design: .monospaced)).foregroundStyle(DS.Colors.textFaint)
-                }
-                Text("\(item.kcal) kcal").font(.system(size: 11, weight: .semibold)).foregroundStyle(DS.Colors.amber)
             }
             HStack(spacing: DS.Spacing.sm) {
-                StatusChip(text: "NOVA \(item.novaClass)", style: item.novaClass >= 4 ? .danger : (item.novaClass >= 3 ? .amber : .teal))
-                if let q = item.quantityDescription, !q.isEmpty {
-                    Text(q).font(.system(size: 10)).foregroundStyle(DS.Colors.textMuted).lineLimit(1)
+                HStack(spacing: 3) {
+                    ForEach(0..<10, id: \.self) { i in
+                        RoundedRectangle(cornerRadius: 1.5, style: .continuous)
+                            .fill(i < logQuality ? logQualityColor : DS.Colors.track)
+                            .frame(maxWidth: .infinity)
+                            .frame(height: 8)
+                    }
                 }
-                Spacer()
-                if let qc = item.quantityConfidence { Text(qc).font(.system(size: 9, weight: .semibold)).foregroundStyle(DS.Colors.textFaint) }
+                Text("Q\(logQuality)/10")
+                    .font(.system(size: 10, weight: .bold, design: .monospaced))
+                    .foregroundStyle(logQualityColor)
             }
-            if let nr = item.novaReasoning, !nr.isEmpty {
-                Text(nr).font(.system(size: 10)).foregroundStyle(DS.Colors.textFaint).fixedSize(horizontal: false, vertical: true)
-            }
-            if !item.mindTags.isEmpty {
-                Text(item.mindTags.joined(separator: " · ")).font(.system(size: 10, weight: .medium)).foregroundStyle(DS.Colors.teal)
-            }
-        }
-        .padding(DS.Spacing.md)
-        .glassDefault()
-    }
-
-    private var methodNote: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            Text("HOW THIS WAS ESTIMATED").font(.system(size: 9, weight: .bold)).foregroundStyle(DS.Colors.textFaint).tracking(0.8)
-            Text(methodText).font(.system(size: 11)).foregroundStyle(DS.Colors.textMuted).fixedSize(horizontal: false, vertical: true)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(DS.Spacing.md)
         .glassDefault()
     }
 
-    private var methodText: String {
-        let qualityLine = " · Log quality \(logQuality)/10 reflects how this was captured."
+    private var sourceIcon: String {
         switch entry.source {
-        case "barcode": return "Read straight off the product label (Open Food Facts) — the most accurate source. Calories scale to the portion you logged." + qualityLine
-        case "combined": return "Built from multiple sources (barcode + photo + description). Barcoded items are label-exact; the rest are AI estimates." + qualityLine
-        case "photo": return "AI identified the foods from your photo and estimated portions using your body profile. Photo is great for what's on the plate; portion is the rough part — tap Edit to correct grams." + qualityLine
-        case "text", "manual":
-            if (entry.confidence ?? "") == "rough_text" || (entry.confidence ?? "") == "estimate" {
-                return "Estimated by a quick keyword match (AI was unavailable). Numbers are rough — re-open and tap Deep analysis for an accurate read." + qualityLine
-            }
-            return "AI estimated this from your description + your body profile. Food identity is solid; portion is the main uncertainty — add grams in the description for a tighter number." + qualityLine
-        default: return "Quick-logged with a default estimate. Tap Edit to refine kcal or items." + qualityLine
+        case "photo": return "camera.fill"
+        case "barcode": return "barcode.viewfinder"
+        case "combined": return "square.stack.3d.up.fill"
+        case "text", "manual": return "text.bubble.fill"
+        default: return "bolt.fill"
         }
     }
 
@@ -1360,6 +1241,59 @@ private struct FoodDetailView: View {
                 .background(Capsule().fill(DS.Colors.violet.opacity(0.12)).overlay(Capsule().stroke(DS.Colors.violet.opacity(0.3), lineWidth: 0.5)))
         }
         .buttonStyle(.plain)
+    }
+}
+
+/// One detected item in the meal detail. The NOVA chip is a disclosure — tap it
+/// to reveal the AI's classification reasoning instead of always printing prose.
+private struct DetailItemRow: View {
+    let item: DetectedItem
+    @State private var showReasoning = false
+
+    private var hasReasoning: Bool { !(item.novaReasoning ?? "").isEmpty }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack {
+                Text(item.name).font(.system(size: 14, weight: .semibold, design: .rounded)).foregroundStyle(DS.Colors.textPrimary)
+                Spacer()
+                if item.grams > 0 {
+                    Text("\(item.grams) g").font(.system(size: 11, weight: .medium, design: .monospaced)).foregroundStyle(DS.Colors.textFaint)
+                }
+                Text("\(item.kcal) kcal").font(.system(size: 11, weight: .semibold)).foregroundStyle(DS.Colors.amber)
+            }
+            HStack(spacing: DS.Spacing.sm) {
+                Button {
+                    guard hasReasoning else { return }
+                    DS.Haptic.tap()
+                    withAnimation(DS.Anim.quick) { showReasoning.toggle() }
+                } label: {
+                    HStack(spacing: 3) {
+                        StatusChip(text: "NOVA \(item.novaClass)", style: item.novaClass >= 4 ? .danger : (item.novaClass >= 3 ? .amber : .teal))
+                        if hasReasoning {
+                            Image(systemName: "chevron.down")
+                                .font(.system(size: 8, weight: .bold))
+                                .foregroundStyle(DS.Colors.textFaint)
+                                .rotationEffect(.degrees(showReasoning ? 180 : 0))
+                        }
+                    }
+                }
+                .buttonStyle(.plain)
+                if let q = item.quantityDescription, !q.isEmpty {
+                    Text(q).font(.system(size: 10)).foregroundStyle(DS.Colors.textMuted).lineLimit(1)
+                }
+                Spacer()
+                if let qc = item.quantityConfidence { Text(qc).font(.system(size: 9, weight: .semibold)).foregroundStyle(DS.Colors.textFaint) }
+            }
+            if showReasoning, let nr = item.novaReasoning, !nr.isEmpty {
+                Text(nr).font(.system(size: 10)).foregroundStyle(DS.Colors.textFaint).fixedSize(horizontal: false, vertical: true)
+            }
+            if !item.mindTags.isEmpty {
+                Text(item.mindTags.joined(separator: " · ")).font(.system(size: 10, weight: .medium)).foregroundStyle(DS.Colors.teal)
+            }
+        }
+        .padding(DS.Spacing.md)
+        .glassDefault()
     }
 }
 

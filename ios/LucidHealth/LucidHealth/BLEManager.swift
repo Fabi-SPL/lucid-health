@@ -233,7 +233,7 @@ class BLEManager: NSObject, ObservableObject {
     /// Push cadence is conditional on the high-frequency broadcast toggle:
     ///   • Broadcaster ON  → 1s (BLE-rate, near-real-time)
     ///   • Broadcaster OFF → 10s (battery + bandwidth conservation)
-    /// UserDefaults mirror is kept in sync by HighFrequencyBroadcastCard.save()
+    /// UserDefaults mirror is kept in sync by BroadcastCard.saveHFB()
     /// and .load() — BLEManager re-reads on every timer rebuild, triggered by
     /// .lucidHFBToggleChanged notification.
     static let hfbBroadcastEnabledKey = "lucid_hfb_broadcast_enabled"

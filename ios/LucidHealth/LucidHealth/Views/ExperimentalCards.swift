@@ -1,14 +1,16 @@
 import SwiftUI
 
 // ════════════════════════════════════════════════════════════════════════
-// Experimental feature cards (Discord, Hue, Spiral log) for SettingsView
-// All four Whoop-pattern foundations land here. Coherence drill lives in
-// its own full-screen view (CoherenceDrillView).
+// Experimental feature cards for SettingsView.
+// Discord + High-Frequency broadcast merged into ONE Broadcast card (they
+// share the pipe — one audience, two cadences). HueMirrorCard deleted:
+// config UI for a write path that never ran. Spiral log lives on Insights.
 // ════════════════════════════════════════════════════════════════════════
 
-// MARK: - Discord Broadcast Card
+// MARK: - Broadcast Card (Discord webhook + HFB cadence)
 
-struct DiscordBroadcastCard: View {
+struct BroadcastCard: View {
+    // Discord webhook settings
     @State private var enabled = false
     @State private var webhookURL = ""
     @State private var customLabel = ""
@@ -24,32 +26,56 @@ struct DiscordBroadcastCard: View {
     @State private var savedFlash = false
     @State private var expanded = false
 
+    // High-frequency cadence (1s vs 10s push interval)
+    @State private var hfbEnabled = false
+    @State private var hfbLoaded = false
+
     private let svc = ExperimentalFeaturesService.shared
 
     var body: some View {
         VStack(alignment: .leading, spacing: DS.Spacing.md) {
             HStack {
-                SectionHeader(icon: "megaphone.fill", title: "Discord Broadcast", iconColor: DS.Colors.violet)
+                SectionHeader(icon: "megaphone.fill", title: "Broadcast", iconColor: DS.Colors.violet)
                 Spacer()
-                if enabled && pushCount > 0 {
-                    StatusChip(text: "live · \(pushCount)", style: .teal, icon: "dot.radiowaves.left.and.right")
+                if enabled {
+                    AmbientLiveDot(state: .connected)
                 }
             }
 
-            Text("Replaces Pulsoid / HypeRate. Posts your live biometrics to a Discord channel via webhook — edits one message instead of spamming chat.")
-                .font(.system(size: 12, design: .rounded))
-                .foregroundStyle(DS.Colors.textSecondary)
-                .lineLimit(nil)
+            // Proof-of-life row — replaces the two intro paragraphs.
+            if pushCount > 0 {
+                HStack(spacing: 6) {
+                    Image(systemName: "dot.radiowaves.left.and.right")
+                        .font(.system(size: 11))
+                        .foregroundStyle(enabled ? DS.Colors.teal : DS.Colors.textFaint)
+                    Text(proofOfLife)
+                        .font(.system(size: 11, weight: .semibold, design: .monospaced))
+                        .foregroundStyle(DS.Colors.textSecondary)
+                        .monospacedDigit()
+                    Spacer()
+                }
+            }
 
-            // Master toggle
+            // Master toggle (Discord webhook push)
             Toggle(isOn: $enabled) {
-                Text("Broadcast enabled")
+                Text("Broadcast to Discord")
                     .font(.system(size: 14, weight: .semibold, design: .rounded))
                     .foregroundStyle(DS.Colors.textPrimary)
             }
             .tint(DS.Colors.violet)
 
-            // Expand for config
+            // Push cadence — one 2-segment control instead of a second card.
+            VStack(alignment: .leading, spacing: 6) {
+                Text("CADENCE")
+                    .font(.system(size: 9, weight: .bold, design: .monospaced))
+                    .foregroundStyle(DS.Colors.textMuted)
+                HStack(spacing: 6) {
+                    cadenceButton("10s · normal", active: !hfbEnabled) { setHFB(false) }
+                    cadenceButton("1s · high drain", active: hfbEnabled) { setHFB(true) }
+                }
+            }
+
+            // Expand for webhook config
             Button {
                 withAnimation(.spring(duration: 0.4)) { expanded.toggle() }
             } label: {
@@ -100,7 +126,7 @@ struct DiscordBroadcastCard: View {
                         toggleRow("🧠 hmm state", $showState, color: DS.Colors.violet)
                     }
 
-                    // Refresh interval
+                    // Discord message refresh interval
                     HStack {
                         Text("REFRESH")
                             .font(.system(size: 9, weight: .bold, design: .monospaced))
@@ -115,17 +141,6 @@ struct DiscordBroadcastCard: View {
                                     .background(refreshSeconds == sec ? DS.Colors.violet : DS.Colors.surface)
                                     .clipShape(Capsule())
                             }
-                        }
-                    }
-
-                    if pushCount > 0 {
-                        HStack {
-                            Image(systemName: "checkmark.circle.fill")
-                                .foregroundStyle(DS.Colors.teal)
-                                .font(.system(size: 12))
-                            Text("\(pushCount) updates pushed")
-                                .font(.system(size: 11, design: .monospaced))
-                                .foregroundStyle(DS.Colors.textMuted)
                         }
                     }
                 }
@@ -157,7 +172,41 @@ struct DiscordBroadcastCard: View {
         .glassDefault()
         .task {
             if !loaded { await loadSettings() }
+            if !hfbLoaded { await loadHFB() }
         }
+    }
+
+    // "last push 12s · 1,204 updates"
+    private var proofOfLife: String {
+        var parts: [String] = []
+        if let iso = lastPushedAt, let d = parseISO(iso) {
+            let s = Int(Date().timeIntervalSince(d))
+            let ago = s < 60 ? "\(s)s" : (s < 3600 ? "\(s / 60)m" : "\(s / 3600)h")
+            parts.append("last push \(ago)")
+        }
+        parts.append("\(pushCount) updates")
+        return parts.joined(separator: " · ")
+    }
+
+    private func parseISO(_ iso: String) -> Date? {
+        let f = ISO8601DateFormatter()
+        f.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        return f.date(from: iso) ?? ISO8601DateFormatter().date(from: iso)
+    }
+
+    @ViewBuilder
+    private func cadenceButton(_ label: String, active: Bool, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Text(label)
+                .font(.system(size: 11, weight: .semibold, design: .rounded))
+                .padding(.horizontal, 10)
+                .padding(.vertical, 6)
+                .frame(maxWidth: .infinity)
+                .foregroundStyle(active ? .white : DS.Colors.textSecondary)
+                .background(active ? DS.Colors.teal : DS.Colors.surface)
+                .clipShape(Capsule())
+        }
+        .buttonStyle(.plain)
     }
 
     @ViewBuilder
@@ -173,6 +222,8 @@ struct DiscordBroadcastCard: View {
                 .scaleEffect(0.85)
         }
     }
+
+    // MARK: Discord settings I/O
 
     private func loadSettings() async {
         if let s = await svc.fetchBroadcastSettings() {
@@ -218,96 +269,45 @@ struct DiscordBroadcastCard: View {
             }
         }
     }
-}
 
-// MARK: - High Frequency Broadcast Card
+    // MARK: HFB cadence I/O (mirrors the old High Frequency Broadcast card
+    // exactly — UserDefaults mirror + BLEManager retune notification).
 
-struct HighFrequencyBroadcastCard: View {
-    @State private var enabled = false
-    @State private var lastMessage: String? = nil
-    @State private var loaded = false
-    @State private var saving = false
-
-    private let svc = ExperimentalFeaturesService.shared
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: DS.Spacing.md) {
-            HStack {
-                SectionHeader(icon: "antenna.radiowaves.left.and.right", title: "High Frequency Broadcast", iconColor: DS.Colors.teal)
-                Spacer()
-                if enabled {
-                    StatusChip(text: "live", style: .teal, icon: "dot.radiowaves.left.and.right")
-                }
-            }
-
-            Text("Streams live biometrics at a 1 s push cadence while enabled. Uses more battery and data than the default 10 s interval.")
-                .font(.system(size: 12, design: .rounded))
-                .foregroundStyle(DS.Colors.textSecondary)
-
-            if let last = lastMessage, !last.isEmpty {
-                HStack(alignment: .top, spacing: 6) {
-                    Image(systemName: "bubble.left.fill")
-                        .font(.system(size: 11))
-                        .foregroundStyle(DS.Colors.teal)
-                    Text(last)
-                        .font(.system(size: 11, design: .monospaced))
-                        .foregroundStyle(DS.Colors.textPrimary)
-                        .lineLimit(2)
-                }
-                .padding(8)
-                .background(DS.Colors.surface)
-                .clipShape(RoundedRectangle(cornerRadius: 8))
-            }
-
-            Toggle(isOn: $enabled) {
-                Text("Broadcaster on")
-                    .font(.system(size: 14, weight: .semibold, design: .rounded))
-                    .foregroundStyle(DS.Colors.textPrimary)
-            }
-            .tint(DS.Colors.teal)
-            .onChange(of: enabled) { _, newValue in
-                // Mirror to UserDefaults + notify BLEManager to retune pushInterval.
-                // BLEManager pushes every 1s when broadcaster is ON and every
-                // 10s when OFF (battery conservation).
-                UserDefaults.standard.set(newValue, forKey: BLEManager.hfbBroadcastEnabledKey)
-                NotificationCenter.default.post(name: .lucidHFBToggleChanged, object: nil)
-                Task { await save() }
-            }
-        }
-        .padding(DS.Spacing.lg)
-        .glassDefault()
-        .task { if !loaded { await load() } }
+    private func setHFB(_ on: Bool) {
+        guard hfbEnabled != on else { return }
+        hfbEnabled = on
+        UserDefaults.standard.set(on, forKey: BLEManager.hfbBroadcastEnabledKey)
+        NotificationCenter.default.post(name: .lucidHFBToggleChanged, object: nil)
+        if on { UIImpactFeedbackGenerator(style: .light).impactOccurred() }
+        Task { await saveHFB() }
     }
 
-    private func load() async {
+    private func loadHFB() async {
         if let s = await svc.fetchHFBSettings() {
             await MainActor.run {
-                enabled = s.enabled
-                lastMessage = s.last_message
-                loaded = true
+                hfbEnabled = s.enabled
+                hfbLoaded = true
                 // Sync UserDefaults mirror + notify BLEManager so pushInterval
                 // matches the persisted Supabase state on every app launch.
                 UserDefaults.standard.set(s.enabled, forKey: BLEManager.hfbBroadcastEnabledKey)
                 NotificationCenter.default.post(name: .lucidHFBToggleChanged, object: nil)
             }
         } else {
-            loaded = true
+            hfbLoaded = true
         }
     }
 
-    private func save() async {
-        guard loaded else { return }
-        saving = true
-        defer { saving = false }
-        // Fetch existing settings to preserve fields the broadcaster's UI now owns
+    private func saveHFB() async {
+        guard hfbLoaded else { return }
+        // Fetch existing settings to preserve fields the broadcaster's UI owns
         // (mode, vibe_style, privacy_mode, etc.). We only mutate enabled.
         if var s = await svc.fetchHFBSettings() {
-            s.enabled = enabled
+            s.enabled = hfbEnabled
             _ = await svc.upsertHFBSettings(s)
         } else {
             // First-run: write a sensible default record with just enabled
             let fresh = ExperimentalFeaturesService.HFBSettings(
-                enabled: enabled,
+                enabled: hfbEnabled,
                 osc_host: "127.0.0.1", osc_port: 9000, refresh_seconds: 1.0,
                 mode: "vibe",
                 show_hr: true, show_hrv: true, show_baevsky: false,
@@ -327,119 +327,6 @@ struct HighFrequencyBroadcastCard: View {
             )
             _ = await svc.upsertHFBSettings(fresh)
         }
-        if enabled {
-            UIImpactFeedbackGenerator(style: .light).impactOccurred()
-        }
-    }
-}
-
-// MARK: - Hue Mirror Card (small, foundation only)
-
-struct HueMirrorCard: View {
-    @State private var enabled = false
-    @State private var bridgeIP = ""
-    @State private var bridgeToken = ""
-    @State private var groupID = ""
-    @State private var onlyAfterSundown = true
-    @State private var loaded = false
-    @State private var saving = false
-    @State private var expanded = false
-
-    private let svc = ExperimentalFeaturesService.shared
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: DS.Spacing.md) {
-            HStack {
-                SectionHeader(icon: "lightbulb.fill", title: "Hue Mirror", iconColor: DS.Colors.amber)
-                Spacer()
-                StatusChip(text: enabled ? "on" : "off", style: enabled ? .teal : .violet)
-            }
-
-            Text("Optional. Maps your nervous system state → bedside light color (calm = teal, stressed = amber → red). Foundation only — not actively pushed.")
-                .font(.system(size: 11, design: .rounded))
-                .foregroundStyle(DS.Colors.textSecondary)
-
-            Toggle("Enable Hue mirror", isOn: $enabled)
-                .font(.system(size: 13, weight: .semibold, design: .rounded))
-                .tint(DS.Colors.amber)
-
-            Button {
-                withAnimation(.spring(duration: 0.4)) { expanded.toggle() }
-            } label: {
-                Text(expanded ? "Hide config" : "Configure bridge")
-                    .font(.system(size: 11, weight: .medium, design: .rounded))
-                    .foregroundStyle(DS.Colors.amber)
-            }
-
-            if expanded {
-                VStack(alignment: .leading, spacing: 8) {
-                    inputField("BRIDGE IP", $bridgeIP, placeholder: "192.168.1.42")
-                    inputField("API TOKEN", $bridgeToken, placeholder: "from Hue API")
-                    inputField("GROUP ID", $groupID, placeholder: "1")
-                    Toggle("Only after sundown", isOn: $onlyAfterSundown)
-                        .font(.system(size: 11, design: .rounded))
-                        .tint(DS.Colors.amber)
-                }
-            }
-
-            Button {
-                Task { await save() }
-            } label: {
-                Text("Save")
-                    .font(.system(size: 12, weight: .semibold, design: .rounded))
-                    .foregroundStyle(.white)
-                    .frame(maxWidth: .infinity).padding(.vertical, 8)
-                    .background(DS.Colors.amber)
-                    .clipShape(Capsule())
-            }
-            .disabled(saving)
-        }
-        .padding(DS.Spacing.lg)
-        .glassDefault()
-        .task { if !loaded { await loadSettings() } }
-    }
-
-    @ViewBuilder
-    private func inputField(_ label: String, _ binding: Binding<String>, placeholder: String) -> some View {
-        VStack(alignment: .leading, spacing: 3) {
-            Text(label)
-                .font(.system(size: 9, weight: .bold, design: .monospaced))
-                .foregroundStyle(DS.Colors.textMuted)
-            TextField(placeholder, text: binding)
-                .font(.system(size: 11, design: .monospaced))
-                .padding(6)
-                .background(DS.Colors.surface)
-                .clipShape(RoundedRectangle(cornerRadius: 6))
-                .autocapitalization(.none)
-                .autocorrectionDisabled()
-        }
-    }
-
-    private func loadSettings() async {
-        if let s = await svc.fetchHueSettings() {
-            await MainActor.run {
-                enabled = s.enabled
-                bridgeIP = s.bridge_ip ?? ""
-                bridgeToken = s.bridge_token ?? ""
-                groupID = s.group_id ?? ""
-                onlyAfterSundown = s.only_after_sundown
-                loaded = true
-            }
-        } else { loaded = true }
-    }
-
-    private func save() async {
-        saving = true
-        defer { saving = false }
-        let s = ExperimentalFeaturesService.HueSettings(
-            enabled: enabled,
-            bridge_ip: bridgeIP.isEmpty ? nil : bridgeIP,
-            bridge_token: bridgeToken.isEmpty ? nil : bridgeToken,
-            group_id: groupID.isEmpty ? nil : groupID,
-            only_after_sundown: onlyAfterSundown
-        )
-        _ = await svc.upsertHueSettings(s)
-        UIImpactFeedbackGenerator(style: .light).impactOccurred()
     }
 }
 
