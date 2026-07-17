@@ -81,7 +81,6 @@
 		LH000066 /* HRVRingMini.swift in Sources */ = {isa = PBXBuildFile; fileRef = LH100066; };
 		LH000067 /* SparklineChart.swift in Sources */ = {isa = PBXBuildFile; fileRef = LH100067; };
 		LH000068 /* FormatDiversityHint.swift in Sources */ = {isa = PBXBuildFile; fileRef = LH100068; };
-		LH000069 /* ActivityView.swift in Sources */ = {isa = PBXBuildFile; fileRef = LH100069; };
 		LH00006A /* ActivityEditSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = LH10006A; };
 		LH00006B /* SleepAdjustSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = LH10006B; };
 		LH00006C /* QuickTagSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = LH10006C; };
@@ -211,7 +210,6 @@
 		LH100066 /* HRVRingMini.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HRVRingMini.swift; sourceTree = "<group>"; };
 		LH100067 /* SparklineChart.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SparklineChart.swift; sourceTree = "<group>"; };
 		LH100068 /* FormatDiversityHint.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FormatDiversityHint.swift; sourceTree = "<group>"; };
-		LH100069 /* ActivityView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ActivityView.swift; sourceTree = "<group>"; };
 		LH10006A /* ActivityEditSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ActivityEditSheet.swift; sourceTree = "<group>"; };
 		LH10006B /* SleepAdjustSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SleepAdjustSheet.swift; sourceTree = "<group>"; };
 		LH10006C /* QuickTagSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QuickTagSheet.swift; sourceTree = "<group>"; };
@@ -326,7 +324,6 @@
 				LH100029 /* ReviewView.swift */,
 				LH10002A /* BarcodeScannerView.swift */,
 				LH10002B /* BarcodeResultView.swift */,
-				LH100069 /* ActivityView.swift */,
 				LH10006A /* ActivityEditSheet.swift */,
 				LH10006B /* SleepAdjustSheet.swift */,
 				LH10006E /* EditFoodEntrySheet.swift */,
@@ -575,7 +572,6 @@
 				LH000066 /* HRVRingMini.swift in Sources */,
 				LH000067 /* SparklineChart.swift in Sources */,
 				LH000068 /* FormatDiversityHint.swift in Sources */,
-				LH000069 /* ActivityView.swift in Sources */,
 				LH00006A /* ActivityEditSheet.swift in Sources */,
 				LH00006B /* SleepAdjustSheet.swift in Sources */,
 				LH00006C /* QuickTagSheet.swift in Sources */,
