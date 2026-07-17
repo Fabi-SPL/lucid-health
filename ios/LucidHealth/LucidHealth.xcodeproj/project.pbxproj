@@ -69,7 +69,6 @@
 		LH000042 /* RecoveryBreakdownBar.swift in Sources */ = {isa = PBXBuildFile; fileRef = LH100042; };
 		LH000043 /* StrainZonesBar.swift in Sources */ = {isa = PBXBuildFile; fileRef = LH100043; };
 		LH000044 /* IllnessRiskGauge.swift in Sources */ = {isa = PBXBuildFile; fileRef = LH100044; };
-		LH000045 /* HRVSparkline.swift in Sources */ = {isa = PBXBuildFile; fileRef = LH100045; };
 		LH000046 /* TimeOfDayHero.swift in Sources */ = {isa = PBXBuildFile; fileRef = LH100046; };
 		LH000060 /* CategoryDot.swift in Sources */ = {isa = PBXBuildFile; fileRef = LH100060; };
 		LH000061 /* PillTabBar.swift in Sources */ = {isa = PBXBuildFile; fileRef = LH100061; };
@@ -198,7 +197,6 @@
 		LH100042 /* RecoveryBreakdownBar.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RecoveryBreakdownBar.swift; sourceTree = "<group>"; };
 		LH100043 /* StrainZonesBar.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StrainZonesBar.swift; sourceTree = "<group>"; };
 		LH100044 /* IllnessRiskGauge.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IllnessRiskGauge.swift; sourceTree = "<group>"; };
-		LH100045 /* HRVSparkline.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HRVSparkline.swift; sourceTree = "<group>"; };
 		LH100046 /* TimeOfDayHero.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TimeOfDayHero.swift; sourceTree = "<group>"; };
 		LH100060 /* CategoryDot.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CategoryDot.swift; sourceTree = "<group>"; };
 		LH100061 /* PillTabBar.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PillTabBar.swift; sourceTree = "<group>"; };
@@ -360,7 +358,6 @@
 				LH100042 /* RecoveryBreakdownBar.swift */,
 				LH100043 /* StrainZonesBar.swift */,
 				LH100044 /* IllnessRiskGauge.swift */,
-				LH100045 /* HRVSparkline.swift */,
 				LH100046 /* TimeOfDayHero.swift */,
 				LH100060 /* CategoryDot.swift */,
 				LH100061 /* PillTabBar.swift */,
@@ -560,7 +557,6 @@
 				LH000042 /* RecoveryBreakdownBar.swift in Sources */,
 				LH000043 /* StrainZonesBar.swift in Sources */,
 				LH000044 /* IllnessRiskGauge.swift in Sources */,
-				LH000045 /* HRVSparkline.swift in Sources */,
 				LH000046 /* TimeOfDayHero.swift in Sources */,
 				LH000060 /* CategoryDot.swift in Sources */,
 				LH000061 /* PillTabBar.swift in Sources */,
