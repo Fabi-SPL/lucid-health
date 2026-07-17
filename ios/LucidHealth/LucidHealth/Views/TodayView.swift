@@ -56,6 +56,11 @@ struct TodayView: View {
         return f.string(from: date)
     }
 
+    /// v98 — true while a sleep session is unfinished (wake detection hasn't fired).
+    private var canManualWake: Bool {
+        engine.sleepDetected || (engine.sleepStartTime != nil && engine.sleepEndTime == nil)
+    }
+
     // MARK: - Body
 
     var body: some View {
@@ -257,6 +262,35 @@ struct TodayView: View {
                         .opacity(appeared ? 1 : 0)
                         .animation(DS.Anim.cardAppear, value: appeared)
                         .scrollSectionTransition()
+                }
+
+                // v98 safety net (moved from Health): manual wake-up while a sleep
+                // session is unfinished. All-day — mode can be .day at noon with
+                // sleep still open when HR-driven wake detection misses Fabi's
+                // chronic-low baseline. Hidden in .morning, where ModeBanner
+                // already carries the big I'm-awake CTA.
+                if canManualWake && modeStore.current != .morning {
+                    Button {
+                        DS.Haptic.success()
+                        engine.manualWakeUp()
+                    } label: {
+                        Label("I'm awake", systemImage: "sun.max.fill")
+                            .font(.system(size: 13, weight: .semibold, design: .rounded))
+                            .foregroundStyle(DS.Colors.amber)
+                            .padding(.horizontal, DS.Spacing.md)
+                            .padding(.vertical, DS.Spacing.sm)
+                            .frame(maxWidth: .infinity)
+                            .background(
+                                Capsule()
+                                    .fill(DS.Colors.amber.opacity(0.10))
+                                    .overlay(Capsule().stroke(DS.Colors.amber.opacity(0.25), lineWidth: 0.5))
+                            )
+                    }
+                    .buttonStyle(.plain)
+                    .padding(.horizontal, DS.Spacing.md)
+                    .padding(.top, DS.Spacing.md)
+                    .opacity(appeared ? 1 : 0)
+                    .animation(DS.Anim.cardAppear, value: appeared)
                 }
 
                 // Morning: mode banner (I'm-awake CTA) + last-night ribbon + wake coach.

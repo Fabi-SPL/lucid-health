@@ -10,7 +10,6 @@ struct SettingsView: View {
     @State private var overridePassword = ""
     @State private var isSavingCredentials = false
     @State private var credentialSaved = false
-    @State private var showLogs = false
 
     var body: some View {
         ScrollView(showsIndicators: false) {
@@ -22,25 +21,23 @@ struct SettingsView: View {
 
                 staggered(1) { AuthStatusCard() }
                 staggered(2) { PersonalizationCard() }
-                staggered(3) { BLEControlCard(bleManager: bleManager) }
-                staggered(4) { AppInfoCard() }
-                staggered(5) { DisplayCard() }
+                staggered(3) { AppInfoCard() }
+                staggered(4) { DisplayCard() }
 
                 // ── EXPERIMENTAL ─────────────────────────────────────
                 // Whoop-pattern experiments — opt-in, may break, that's the point.
-                groupHeader("EXPERIMENTAL · LABS", icon: "flask.fill", index: 6, tint: DS.Colors.violet)
+                // Discord + HFB merged into one Broadcast card; HueMirror deleted
+                // (config UI for a write path that never ran).
+                groupHeader("EXPERIMENTAL · LABS", icon: "flask.fill", index: 5, tint: DS.Colors.violet)
 
-                staggered(7) { DiscordBroadcastCard() }
-                staggered(8) { HighFrequencyBroadcastCard() }
-                // SpiralAlertsLogCard → Insights (it's an event log, not config).
-                staggered(10) { HueMirrorCard() }
+                staggered(6) { BroadcastCard() }
 
                 // ── DIAGNOSTICS ──────────────────────────────────────
                 // Strap/data plumbing + dev tools. NOT experimental features —
                 // these are the "is the hardware working" instruments.
-                groupHeader("DIAGNOSTICS", icon: "stethoscope", index: 11, tint: DS.Colors.teal)
+                groupHeader("DIAGNOSTICS", icon: "stethoscope", index: 7, tint: DS.Colors.teal)
 
-                staggered(12) {
+                staggered(8) {
                     CredentialOverrideCard(
                         isExpanded: $showCredentialOverride,
                         email: $overrideEmail,
@@ -49,14 +46,43 @@ struct SettingsView: View {
                         saved: credentialSaved
                     ) { await saveCredentials() }
                 }
-                staggered(13) { BLEDiagnosticsCard(bleManager: bleManager) }
-                staggered(14) { DataSyncCard(bleManager: bleManager) }
-                staggered(15) { ManualBackfillCard(bleManager: bleManager) }
-                staggered(16) { DevCard() }
-                staggered(17) { SkinTempDiagnosticsCard(bleManager: bleManager) }
-                staggered(18) { AllStreamsDiagnosticsCard(bleManager: bleManager) }
-                staggered(19) { BatteryDiagnosticsCard(bleManager: bleManager) }
-                staggered(20) { LogViewerCard { showLogs = true } }
+                staggered(9) { BLEDiagnosticsCard(bleManager: bleManager) }
+                staggered(10) { ManualBackfillCard(bleManager: bleManager) }
+
+                // Deep strap internals (skin temp, streams, battery, logs) live
+                // one level down — Diagnostics subpage, not the main scroll.
+                staggered(11) {
+                    NavigationLink {
+                        DiagnosticsView(bleManager: bleManager)
+                    } label: {
+                        HStack(spacing: DS.Spacing.md) {
+                            ZStack {
+                                Circle()
+                                    .fill(DS.Colors.teal.opacity(0.12))
+                                    .frame(width: 36, height: 36)
+                                Image(systemName: "stethoscope")
+                                    .font(.system(size: 15, weight: .semibold))
+                                    .foregroundStyle(DS.Colors.teal)
+                            }
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text("Diagnostics")
+                                    .font(.system(size: 14, weight: .semibold, design: .rounded))
+                                    .foregroundStyle(DS.Colors.textPrimary)
+                                Text("Skin temp · streams · strap battery · logs")
+                                    .font(.system(size: 11))
+                                    .foregroundStyle(DS.Colors.textMuted)
+                                    .lineLimit(1)
+                            }
+                            Spacer()
+                            Image(systemName: "chevron.right")
+                                .font(.system(size: 11, weight: .semibold))
+                                .foregroundStyle(DS.Colors.textFaint)
+                        }
+                        .padding(DS.Spacing.md)
+                        .glassDefault()
+                    }
+                    .buttonStyle(.plain)
+                }
 
                 bottomSpacer
             }
@@ -64,10 +90,6 @@ struct SettingsView: View {
         }
         .navigationTitle("Settings")
         .navigationBarTitleDisplayMode(.inline)
-        .sheet(isPresented: $showLogs) {
-            LogViewerView()
-                .presentationDetents([.large])
-        }
         .onAppear { withAnimation { appeared = true } }
     }
 
@@ -113,6 +135,81 @@ struct SettingsView: View {
         await SupabaseClient.shared.signInIfNeeded()
         credentialSaved = true
         isSavingCredentials = false
+    }
+}
+
+// MARK: - Diagnostics subpage
+// Deep strap internals, one level below Settings. Device telemetry that used
+// to squat on the Health tab lands here too — telemetry ≠ health data.
+
+struct DiagnosticsView: View {
+    @ObservedObject var bleManager: BLEManager
+    @State private var showLogs = false
+
+    var body: some View {
+        ScrollView(showsIndicators: false) {
+            LazyVStack(spacing: DS.Spacing.md) {
+                Color.clear.frame(height: DS.Spacing.sm)
+
+                deviceTelemetryCard
+                SkinTempDiagnosticsCard(bleManager: bleManager)
+                AllStreamsDiagnosticsCard(bleManager: bleManager)
+                BatteryDiagnosticsCard(bleManager: bleManager)
+                LogViewerCard { showLogs = true }
+
+                Color.clear.frame(height: 100)
+            }
+            .padding(.horizontal, DS.Spacing.md)
+        }
+        .navigationTitle("Diagnostics")
+        .navigationBarTitleDisplayMode(.inline)
+        .sheet(isPresented: $showLogs) {
+            LogViewerView()
+                .presentationDetents([.large])
+        }
+    }
+
+    // Device telemetry (was HealthView's device section).
+    private var deviceTelemetryCard: some View {
+        VStack(alignment: .leading, spacing: DS.Spacing.sm) {
+            SectionHeader(icon: "antenna.radiowaves.left.and.right", title: "DEVICE", iconColor: DS.Colors.textFaint)
+
+            HStack {
+                BLEStatusDot()
+                    .environmentObject(bleManager)
+                Spacer()
+                if bleManager.isWorn {
+                    GlassStatusPill(icon: "figure.walk", text: "Worn", color: DS.Colors.teal)
+                }
+                if bleManager.isCharging {
+                    GlassStatusPill(icon: "bolt.fill", text: "Charging", color: DS.Colors.amber)
+                }
+            }
+
+            let cols = [GridItem(.flexible()), GridItem(.flexible()), GridItem(.flexible())]
+            LazyVGrid(columns: cols, spacing: DS.Spacing.sm) {
+                MetricTile(label: "BATTERY",
+                           value: bleManager.battery > 0 ? "\(Int(bleManager.battery))" : "—",
+                           unit: "%",
+                           color: bleManager.battery < 20 ? DS.Colors.pink : DS.Colors.teal)
+                MetricTile(label: "READINGS",
+                           value: "\(bleManager.readingsToday)",
+                           unit: "today",
+                           color: DS.Colors.violet)
+                MetricTile(label: "SYNC",
+                           value: "\(bleManager.historySyncCount)",
+                           unit: "points",
+                           color: DS.Colors.textSecondary)
+            }
+
+            if let lastSync = bleManager.lastSync {
+                InfoRow(icon: "arrow.clockwise", label: "Last sync",
+                        value: lastSync.formatted(.dateTime.hour().minute().second()),
+                        color: DS.Colors.textFaint)
+            }
+        }
+        .padding(DS.Spacing.md)
+        .glassDefault()
     }
 }
 
@@ -523,50 +620,6 @@ private struct AuthStatusCard: View {
     }
 }
 
-// MARK: - BLE Control Card
-
-private struct BLEControlCard: View {
-    @ObservedObject var bleManager: BLEManager
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: DS.Spacing.md) {
-            SectionHeader(icon: "antenna.radiowaves.left.and.right", title: "Bluetooth Device", iconColor: DS.Colors.teal)
-
-            HStack {
-                BLEStatusDot()
-                    .environmentObject(bleManager)
-                Spacer()
-                if bleManager.isWorn {
-                    StatusChip(text: "Worn", style: .teal, icon: "checkmark.circle.fill")
-                }
-            }
-
-            if bleManager.connectionState == .disconnected {
-                // Full-width pill button — Principle #4
-                Button {
-                    let haptic = UIImpactFeedbackGenerator(style: .light)
-                    haptic.impactOccurred()
-                    NotificationCenter.default.post(name: .lucidReconnectBLE, object: nil)
-                } label: {
-                    Label("Reconnect", systemImage: "arrow.triangle.2.circlepath")
-                        .font(.system(size: 14, weight: .semibold, design: .rounded))
-                        .foregroundStyle(DS.Colors.violet)
-                        .frame(maxWidth: .infinity)
-                        .padding(.vertical, DS.Spacing.md)
-                        .background(
-                            Capsule()
-                                .fill(DS.Colors.violet.opacity(0.12))
-                                .overlay(Capsule().stroke(DS.Colors.violet.opacity(0.3), lineWidth: 0.5))
-                        )
-                }
-                .buttonStyle(.plain)
-            }
-        }
-        .padding(DS.Spacing.lg)
-        .glassDefault()
-    }
-}
-
 // MARK: - App Info Card
 
 // MARK: - Display Settings (v103 — recovery ring style picker)
@@ -618,14 +671,17 @@ private struct DisplayCard: View {
     }
 }
 
+// One About card — app + device facts (absorbed the old Developer info card).
 private struct AppInfoCard: View {
     var body: some View {
         VStack(alignment: .leading, spacing: DS.Spacing.sm) {
-            SectionHeader(icon: "app.badge", title: "App", iconColor: DS.Colors.textFaint)
+            SectionHeader(icon: "app.badge", title: "About", iconColor: DS.Colors.textFaint)
 
             InfoRow(icon: "number", label: "Version", value: BuildInfo.codeVersion)
             InfoRow(icon: "chevron.left.forwardslash.chevron.right", label: "Commit", value: BuildInfo.commitHash)
             InfoRow(icon: "globe", label: "Backend", value: "Supabase · \(URL(string: SupabaseClient.shared.baseURL)?.host ?? "—")")
+            InfoRow(icon: "iphone", label: "iOS", value: UIDevice.current.systemVersion)
+            InfoRow(icon: "cpu", label: "Device", value: UIDevice.current.model)
         }
         .padding(DS.Spacing.lg)
         .glassDefault()
@@ -706,6 +762,17 @@ private struct BLEDiagnosticsCard: View {
         VStack(alignment: .leading, spacing: DS.Spacing.md) {
             SectionHeader(icon: "waveform.path.ecg", title: "BLE Diagnostics", iconColor: DS.Colors.pink)
 
+            // Connection status (absorbed from the old BLE Control card —
+            // same subject, one card).
+            HStack {
+                BLEStatusDot()
+                    .environmentObject(bleManager)
+                Spacer()
+                if bleManager.isWorn {
+                    StatusChip(text: "Worn", style: .teal, icon: "checkmark.circle.fill")
+                }
+            }
+
             let cols = [GridItem(.flexible()), GridItem(.flexible()), GridItem(.flexible())]
             LazyVGrid(columns: cols, spacing: DS.Spacing.sm) {
                 diagCell(label: "HR", value: bleManager.heartRate > 0 ? "\(bleManager.heartRate)" : "—", unit: "bpm", color: DS.Colors.pink)
@@ -765,46 +832,6 @@ private struct BLEDiagnosticsCard: View {
     }
 }
 
-// MARK: - Data Sync Card
-
-private struct DataSyncCard: View {
-    @ObservedObject var bleManager: BLEManager
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: DS.Spacing.md) {
-            SectionHeader(icon: "icloud.and.arrow.up", title: "Data Sync", iconColor: DS.Colors.teal)
-
-            HStack(spacing: DS.Spacing.md) {
-                Image(systemName: bleManager.historySyncCount > 0 ? "checkmark.icloud.fill" : "icloud.slash")
-                    .font(.system(size: 28))
-                    .foregroundStyle(bleManager.historySyncCount > 0 ? DS.Colors.teal : DS.Colors.textFaint)
-
-                VStack(alignment: .leading, spacing: 3) {
-                    Text(bleManager.historySyncCount > 0 ? "Synced" : "No sync")
-                        .font(.system(size: 13, weight: .semibold))
-                        .foregroundStyle(bleManager.historySyncCount > 0 ? DS.Colors.teal : DS.Colors.textFaint)
-
-                    if bleManager.historySyncCount > 0 {
-                        Text("\(bleManager.historySyncCount) data points uploaded")
-                            .font(.system(size: 10))
-                            .foregroundStyle(DS.Colors.textFaint)
-                    }
-
-                    if !bleManager.historySyncProgress.isEmpty {
-                        Text(bleManager.historySyncProgress)
-                            .font(.system(size: 10, design: .monospaced))
-                            .foregroundStyle(DS.Colors.amber)
-                    }
-                }
-
-                Spacer()
-            }
-        }
-        .padding(DS.Spacing.lg)
-        .glassDefault()
-    }
-}
-
 // MARK: - Manual Backfill Card
 //
 // Lets the user trigger a 72h gap-fill from the strap's buffer when something
@@ -817,12 +844,20 @@ private struct DataSyncCard: View {
 private struct ManualBackfillCard: View {
     @ObservedObject var bleManager: BLEManager
     @State private var showFlushConfirm = false
+    @State private var flushExpanded = false
 
     private var isRunning: Bool {
         switch bleManager.manualBackfillState {
         case "querying", "requesting", "parsing", "uploading": return true
         default: return false
         }
+    }
+
+    /// The flush escape hatch only earns screen space after a run that pulled
+    /// nothing new (stuck-buffer signature) — or once a flush already happened.
+    private var showFlushSection: Bool {
+        (bleManager.manualBackfillState == "done" && !bleManager.manualBackfillResult.contains("Backfilled"))
+            || !bleManager.historyFlushResult.isEmpty
     }
 
     private var stateColor: Color {
@@ -863,7 +898,25 @@ private struct ManualBackfillCard: View {
                 }
             }
 
-            Text("If your phone disconnected overnight and left a gap, this asks the strap to dump its buffer and fills any minutes that aren't already covered. Only writes new data — won't duplicate existing rows.")
+            // Sync status rides here (absorbed the old Data Sync card — same pipe).
+            HStack(spacing: 6) {
+                Image(systemName: bleManager.historySyncCount > 0 ? "checkmark.icloud.fill" : "icloud.slash")
+                    .font(.system(size: 12))
+                    .foregroundStyle(bleManager.historySyncCount > 0 ? DS.Colors.teal : DS.Colors.textFaint)
+                Text(bleManager.historySyncCount > 0
+                     ? "\(bleManager.historySyncCount) points synced"
+                     : "No sync yet")
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundStyle(DS.Colors.textMuted)
+                if !bleManager.historySyncProgress.isEmpty {
+                    Text(bleManager.historySyncProgress)
+                        .font(.system(size: 10, design: .monospaced))
+                        .foregroundStyle(DS.Colors.amber)
+                }
+                Spacer()
+            }
+
+            Text("Fills overnight gaps from the strap's buffer — only writes minutes that aren't already covered.")
                 .font(.system(size: 12, design: .rounded))
                 .foregroundStyle(DS.Colors.textMuted)
                 .fixedSize(horizontal: false, vertical: true)
@@ -910,77 +963,64 @@ private struct ManualBackfillCard: View {
             }
 
             // ── Escape hatch: flush a stuck buffer ──────────────────────────
-            // If Backfill keeps returning 0 new minutes, the strap is likely
-            // stuck re-serving a dead ancient buffer region. Wiping it forces a
-            // clean re-dump. Destructive + irreversible → confirm first.
-            Divider().overlay(DS.Colors.border)
+            // Destructive + rare → hidden until a run returns 0 new minutes
+            // (the stuck-buffer signature), and even then behind a disclosure.
+            if showFlushSection {
+                Divider().overlay(DS.Colors.border)
 
-            if !bleManager.historyFlushResult.isEmpty {
-                Text(bleManager.historyFlushResult)
-                    .font(.system(size: 12, weight: .medium, design: .rounded))
-                    .foregroundStyle(bleManager.historyFlushState == "failed" ? DS.Colors.danger : DS.Colors.amber)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
+                DisclosureGroup(isExpanded: $flushExpanded) {
+                    VStack(alignment: .leading, spacing: DS.Spacing.sm) {
+                        if !bleManager.historyFlushResult.isEmpty {
+                            Text(bleManager.historyFlushResult)
+                                .font(.system(size: 12, weight: .medium, design: .rounded))
+                                .foregroundStyle(bleManager.historyFlushState == "failed" ? DS.Colors.danger : DS.Colors.amber)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
 
-            Text("Backfill keeps pulling nothing? The strap may be stuck on an old dead buffer. Wiping it forces a clean re-dump. This erases the strap's internal history — live tracking is unaffected — and can't be undone.")
-                .font(.system(size: 11, design: .rounded))
-                .foregroundStyle(DS.Colors.textFaint)
-                .fixedSize(horizontal: false, vertical: true)
+                        Text("Erases the strap's internal history buffer and forces a clean re-dump. Live tracking keeps working. Can't be undone.")
+                            .font(.system(size: 11, design: .rounded))
+                            .foregroundStyle(DS.Colors.textFaint)
+                            .fixedSize(horizontal: false, vertical: true)
 
-            Button(role: .destructive) {
-                showFlushConfirm = true
-            } label: {
-                HStack(spacing: 8) {
-                    Image(systemName: "trash.fill")
-                        .font(.system(size: 12, weight: .bold))
-                    Text(bleManager.historyFlushState == "erasing" ? "Flushing…" : "Flush stuck history")
+                        Button(role: .destructive) {
+                            showFlushConfirm = true
+                        } label: {
+                            HStack(spacing: 8) {
+                                Image(systemName: "trash.fill")
+                                    .font(.system(size: 12, weight: .bold))
+                                Text(bleManager.historyFlushState == "erasing" ? "Flushing…" : "Flush stuck history")
+                                    .font(.system(size: 12, weight: .semibold, design: .rounded))
+                            }
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 9)
+                            .background(
+                                Capsule().fill(DS.Colors.amber.opacity(0.12))
+                                    .overlay(Capsule().stroke(DS.Colors.amber.opacity(0.4), lineWidth: 0.5))
+                            )
+                            .foregroundStyle(DS.Colors.amber)
+                        }
+                        .buttonStyle(.plain)
+                        .disabled(isRunning || bleManager.connectionState != .streaming || bleManager.historyFlushState == "erasing")
+                    }
+                    .padding(.top, DS.Spacing.sm)
+                } label: {
+                    Label("Buffer stuck? Flush it", systemImage: "exclamationmark.arrow.circlepath")
                         .font(.system(size: 12, weight: .semibold, design: .rounded))
+                        .foregroundStyle(DS.Colors.amber)
                 }
-                .frame(maxWidth: .infinity)
-                .padding(.vertical, 9)
-                .background(
-                    Capsule().fill(DS.Colors.amber.opacity(0.12))
-                        .overlay(Capsule().stroke(DS.Colors.amber.opacity(0.4), lineWidth: 0.5))
-                )
-                .foregroundStyle(DS.Colors.amber)
-            }
-            .buttonStyle(.plain)
-            .disabled(isRunning || bleManager.connectionState != .streaming || bleManager.historyFlushState == "erasing")
-            .confirmationDialog("Wipe the strap's history buffer?", isPresented: $showFlushConfirm, titleVisibility: .visible) {
-                Button("Flush + re-pull", role: .destructive) {
-                    let h = UINotificationFeedbackGenerator()
-                    h.notificationOccurred(.warning)
-                    bleManager.flushHistoryBuffer()
+                .accentColor(DS.Colors.amber)
+                .confirmationDialog("Wipe the strap's history buffer?", isPresented: $showFlushConfirm, titleVisibility: .visible) {
+                    Button("Flush + re-pull", role: .destructive) {
+                        let h = UINotificationFeedbackGenerator()
+                        h.notificationOccurred(.warning)
+                        bleManager.flushHistoryBuffer()
+                    }
+                    Button("Cancel", role: .cancel) {}
+                } message: {
+                    Text("This erases the data the strap is holding in its internal buffer, then pulls a fresh 72h backfill. Live tracking keeps working. This cannot be undone.")
                 }
-                Button("Cancel", role: .cancel) {}
-            } message: {
-                Text("This erases the data the strap is holding in its internal buffer, then pulls a fresh 72h backfill. Live tracking keeps working. This cannot be undone.")
             }
         }
-        .padding(DS.Spacing.lg)
-        .glassDefault()
-    }
-}
-
-// MARK: - Dev Card
-
-private struct DevCard: View {
-    @State private var showDevInfo = false
-
-    var body: some View {
-        DisclosureGroup(isExpanded: $showDevInfo) {
-            VStack(alignment: .leading, spacing: DS.Spacing.sm) {
-                InfoRow(icon: "server.rack", label: "Supabase URL", value: URL(string: SupabaseClient.shared.baseURL)?.host ?? "—")
-                InfoRow(icon: "iphone", label: "iOS Version", value: UIDevice.current.systemVersion)
-                InfoRow(icon: "cpu", label: "Model", value: UIDevice.current.model)
-            }
-            .padding(.top, DS.Spacing.sm)
-        } label: {
-            Label("Developer info", systemImage: "wrench.and.screwdriver")
-                .font(.system(size: 13, weight: .semibold))
-                .foregroundStyle(DS.Colors.textFaint)
-        }
-        .accentColor(DS.Colors.textFaint)
         .padding(DS.Spacing.lg)
         .glassDefault()
     }
@@ -995,6 +1035,7 @@ private struct PersonalizationCard: View {
     @AppStorage(PersonalizationCard.weightKey) private var weightKg: Double = 75.25
     @AppStorage("lucid_user_height_cm") private var heightCm: Double = 178
     @AppStorage("lucid_user_age") private var ageYears: Int = 20
+    @AppStorage("lucid_user_sex") private var sex: String = "male"
     @State private var weightText: String = ""
     @State private var heightText: String = ""
     @State private var ageText: String = ""
@@ -1002,9 +1043,10 @@ private struct PersonalizationCard: View {
 
     static let weightKey = "lucid_user_weight_kg"
 
-    // Mifflin-St Jeor BMR — now uses your real height + age, not assumptions.
+    // Mifflin-St Jeor BMR — real height/age/sex (+5 male, −161 female).
     private var bmr: Int {
-        let value = 10 * weightKg + 6.25 * heightCm - 5 * Double(ageYears) + 5
+        let sexTerm: Double = sex == "female" ? -161 : 5
+        let value = 10 * weightKg + 6.25 * heightCm - 5 * Double(ageYears) + sexTerm
         return Int(value.rounded())
     }
 
@@ -1025,6 +1067,21 @@ private struct PersonalizationCard: View {
             profileRow(label: "Height", text: $heightText, unit: "cm",  placeholder: "178")
             profileRow(label: "Age",    text: $ageText,    unit: "yrs", placeholder: "20")
 
+            // Sex is a real control now — it was a footnote telling you to ask
+            // Lucid to change it. Feeds the BMR sex term + server profile.
+            HStack {
+                Text("Sex")
+                    .font(.system(size: 13, weight: .medium))
+                    .foregroundStyle(DS.Colors.textSecondary)
+                Spacer()
+                Picker("Sex", selection: $sex) {
+                    Text("Male").tag("male")
+                    Text("Female").tag("female")
+                }
+                .pickerStyle(.segmented)
+                .frame(width: 150)
+            }
+
             Button { commit() } label: {
                 Text(savedFlash ? "Saved — the food AI now uses this" : "Save profile")
                     .font(.system(size: 13, weight: .semibold, design: .rounded))
@@ -1043,10 +1100,15 @@ private struct PersonalizationCard: View {
             }
             .padding(.top, 2)
 
-            Text("Feeds calorie targets, alcohol BAC, strain-per-kg — and now the food AI's portion estimates. Sex assumed male; tell Lucid to change it.")
-                .font(.system(size: 10))
-                .foregroundStyle(DS.Colors.textMuted)
-                .padding(.top, 2)
+            // Who consumes this profile — chips instead of a sentence.
+            HStack(spacing: 6) {
+                consumerChip("🍽️", "Food AI")
+                consumerChip("🍷", "BAC")
+                consumerChip("💪", "Strain")
+                consumerChip("🔋", "Targets")
+                Spacer()
+            }
+            .padding(.top, 2)
         }
         .padding(DS.Spacing.md)
         .glassDefault()
@@ -1098,7 +1160,21 @@ private struct PersonalizationCard: View {
     }
 
     private func pushProfile() async {
-        await SupabaseClient.shared.saveBodyProfile(weightKg: weightKg, heightCm: heightCm, age: ageYears, sex: "male")
+        await SupabaseClient.shared.saveBodyProfile(weightKg: weightKg, heightCm: heightCm, age: ageYears, sex: sex)
+    }
+
+    @ViewBuilder
+    private func consumerChip(_ emoji: String, _ label: String) -> some View {
+        HStack(spacing: 3) {
+            Text(emoji).font(.system(size: 9))
+            Text(label)
+                .font(.system(size: 9, weight: .semibold, design: .rounded))
+                .foregroundStyle(DS.Colors.textMuted)
+        }
+        .padding(.horizontal, 7)
+        .padding(.vertical, 3)
+        .background(Capsule().fill(DS.Colors.surface))
+        .overlay(Capsule().stroke(DS.Colors.border, lineWidth: 0.5))
     }
 
     private func formatWeight(_ v: Double) -> String {
