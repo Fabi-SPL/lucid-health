@@ -3,10 +3,21 @@ import SwiftUI
 struct BarcodeResultView: View {
     let product: OpenFoodFactsProduct
     let onSaved: (FoodEntry) -> Void
+    var onSavedSupplement: (() -> Void)?
 
     @State private var isSaving = false
     @State private var error: String?
     @State private var grams: Int
+
+    /// Supplements must not land in food_entries — a capsule logged as a ~2 kcal
+    /// meal is exactly how the June ginger-shot signal was lost.
+    private var isLikelySupplement: Bool {
+        let hay = [(product.productName ?? ""), (product.brand ?? ""),
+                   (product.ingredientsText ?? "")].joined(separator: " ").lowercased()
+        return ["supplement", "nahrungsergänzung", "vitamin", "magnesium", "zink", "zinc",
+                "kreatin", "creatine", "omega", "kapsel", "capsule", "tablette", "d3", "k2"]
+            .contains { hay.contains($0) }
+    }
 
     /// Detect liquid/spirit products to pick sensible portion presets.
     private var isLikelyDrink: Bool {
@@ -35,9 +46,12 @@ struct BarcodeResultView: View {
         }
     }
 
-    init(product: OpenFoodFactsProduct, onSaved: @escaping (FoodEntry) -> Void) {
+    init(product: OpenFoodFactsProduct,
+         onSavedSupplement: (() -> Void)? = nil,
+         onSaved: @escaping (FoodEntry) -> Void) {
         self.product = product
         self.onSaved = onSaved
+        self.onSavedSupplement = onSavedSupplement
         // Default grams: 1 shot for spirits, 250ml for drinks, serving size for solids
         let name = (product.productName ?? "").lowercased()
         let isSpirit = ["whiskey", "whisky", "vodka", "gin", "rum", "tequila"].contains { name.contains($0) }
@@ -159,6 +173,28 @@ struct BarcodeResultView: View {
                 .disabled(isSaving)
                 .padding(.horizontal, DS.Spacing.md)
 
+                // Shelf path — promoted to the top action when the product looks
+                // like a supplement, since portion/kcal are meaningless for it.
+                Button { saveAsSupplement() } label: {
+                    HStack(spacing: 6) {
+                        Image(systemName: "pills.fill").font(.system(size: 13))
+                        Text(isLikelySupplement ? "This is a supplement · Add to shelf"
+                                                : "Add to supplement shelf instead")
+                            .font(DS.Font.bodyMed)
+                    }
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 13)
+                    .foregroundStyle(DS.Colors.violet)
+                    .background(
+                        RoundedRectangle(cornerRadius: DS.Radius.md)
+                            .fill(DS.Colors.violet.opacity(0.10))
+                            .overlay(RoundedRectangle(cornerRadius: DS.Radius.md)
+                                .stroke(DS.Colors.violet.opacity(0.28), lineWidth: 0.5))
+                    )
+                }
+                .disabled(isSaving)
+                .padding(.horizontal, DS.Spacing.md)
+
                 Color.clear.frame(height: DS.Spacing.xl)
             }
             .padding(.top, DS.Spacing.md)
@@ -246,6 +282,27 @@ struct BarcodeResultView: View {
                     gramsOverride: grams
                 )
                 onSaved(entry)
+            } catch {
+                self.error = error.localizedDescription
+            }
+            isSaving = false
+        }
+    }
+
+    /// Open Food Facts carries no dose panel, so the shelf entry starts empty and
+    /// gets its actives filled in from a label photo or by hand.
+    private func saveAsSupplement() {
+        isSaving = true
+        error = nil
+        Task {
+            do {
+                try await SupabaseClient.shared.upsertSupplementProduct(
+                    name: product.productName ?? "Unbekanntes Supplement",
+                    barcode: product.barcode,
+                    brand: product.brand,
+                    source: "barcode"
+                )
+                onSavedSupplement?()
             } catch {
                 self.error = error.localizedDescription
             }

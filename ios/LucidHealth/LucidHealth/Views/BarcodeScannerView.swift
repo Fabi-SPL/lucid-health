@@ -83,7 +83,10 @@ struct BarcodeScannerSheet: View {
                 AuroraBackground()
 
                 if let product {
-                    BarcodeResultView(product: product) { entry in
+                    BarcodeResultView(
+                        product: product,
+                        onSavedSupplement: { dismiss() }
+                    ) { entry in
                         onEntry(entry)
                         dismiss()
                     }

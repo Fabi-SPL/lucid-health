@@ -25,6 +25,8 @@ struct FoodView: View {
     @State private var editing: FoodEntry?
     @State private var detailEntry: FoodEntry?
     @State private var quickEdit: QuickLogSource?
+    @State private var shelf: [SupabaseClient.SupplementShelfItem] = []
+    @State private var cut: SupabaseClient.CutStatus?
 
     private var todayEntries: [FoodEntry] { entries.filter(isToday) }
     private var todayKcal: Int { entries.filter(isToday).compactMap(\.totalKcal).reduce(0, +) }
@@ -94,6 +96,15 @@ struct FoodView: View {
                 // 3 of 4 bento tiles repeated adjacent cards, and the filter's
                 // manual/text sources were unreachable.
                 Section {
+                    if let cut {
+                        CutStatusCard(cut: cut)
+                            .padding(.horizontal, DS.Spacing.md)
+                            .padding(.top, DS.Spacing.sm)
+                            .listRowInsets(EdgeInsets())
+                            .listRowBackground(Color.clear)
+                            .listRowSeparator(.hidden)
+                    }
+
                     FavoritesBar(
                         favorites: favorites,
                         onLog: { item in quickEdit = .preset(item) },
@@ -134,6 +145,17 @@ struct FoodView: View {
                             .listRowInsets(EdgeInsets())
                             .listRowBackground(Color.clear)
                             .listRowSeparator(.hidden)
+                    }
+
+                    if !shelf.isEmpty {
+                        SupplementShelfCard(items: shelf, onLog: { item in
+                            Task { await logSupplement(item) }
+                        })
+                        .padding(.horizontal, DS.Spacing.md)
+                        .padding(.top, DS.Spacing.md)
+                        .listRowInsets(EdgeInsets())
+                        .listRowBackground(Color.clear)
+                        .listRowSeparator(.hidden)
                     }
                 }
 
@@ -199,6 +221,8 @@ struct FoodView: View {
         .task {
             await loadEntries()
             await loadFavorites()
+            await loadShelf()
+            await loadCut()
             withAnimation { appeared = true }
         }
         .sensoryFeedback(.success, trigger: saveSuccessCount)
@@ -375,6 +399,28 @@ struct FoodView: View {
         }
     }
 
+    private func loadShelf() async {
+        if let s = try? await SupabaseClient.shared.supplementShelf() {
+            shelf = s
+        }
+    }
+
+    private func loadCut() async {
+        if let c = try? await SupabaseClient.shared.cutStatus() {
+            cut = c
+        }
+    }
+
+    private func logSupplement(_ item: SupabaseClient.SupplementShelfItem) async {
+        do {
+            try await SupabaseClient.shared.logSupplement(productId: item.id)
+            await loadShelf()
+            saveSuccessCount += 1
+        } catch {
+            saveErrorCount += 1
+        }
+    }
+
     private func saveAsFavorite(_ entry: FoodEntry) async {
         let trimmed = entry.caption?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         let name = trimmed.isEmpty ? entry.items.map(\.name).joined(separator: ", ") : trimmed
@@ -483,6 +529,149 @@ private struct FavoritePill: View {
             )
         }
         .buttonStyle(PressableScale())
+    }
+}
+
+// MARK: - Cut Status (v156 — "left today", the answer logging never had)
+
+private struct CutStatusCard: View {
+    let cut: SupabaseClient.CutStatus
+
+    private var accent: Color { cut.isOver ? DS.Colors.warning : DS.Colors.textPrimary }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: DS.Spacing.md) {
+            HStack(alignment: .firstTextBaseline, spacing: 6) {
+                Text("\(abs(cut.remaining))")
+                    .font(.system(size: 40, weight: .bold, design: .rounded))
+                    .foregroundStyle(accent)
+                    .monospacedDigit()
+                Text(cut.isOver ? "over" : "left today")
+                    .font(.system(size: 14, weight: .medium, design: .rounded))
+                    .foregroundStyle(DS.Colors.textMuted)
+                Spacer()
+                VStack(alignment: .trailing, spacing: 1) {
+                    Text("\(cut.consumed) / \(cut.targetIntake)")
+                        .font(.system(size: 12, weight: .semibold, design: .monospaced))
+                        .foregroundStyle(DS.Colors.textSecondary)
+                    Text("burn \(cut.tdee) · −\(cut.deficitTarget)")
+                        .font(.system(size: 10, design: .rounded))
+                        .foregroundStyle(DS.Colors.textFaint)
+                }
+            }
+
+            bar(pct: cut.intakePct, tint: cut.isOver ? DS.Colors.warning : DS.Colors.violet)
+
+            HStack(spacing: 6) {
+                Text("PROTEIN")
+                    .font(DS.Font.label)
+                    .foregroundStyle(DS.Colors.textMuted)
+                    .tracking(0.8)
+                Text("\(Int(cut.proteinG)) / \(cut.proteinTarget) g")
+                    .font(.system(size: 12, weight: .semibold, design: .monospaced))
+                    .foregroundStyle(cut.proteinPct >= 1 ? DS.Colors.success : DS.Colors.textSecondary)
+                Spacer()
+            }
+
+            bar(pct: cut.proteinPct, tint: cut.proteinPct >= 1 ? DS.Colors.success : DS.Colors.teal)
+        }
+        .glassCard()
+    }
+
+    @ViewBuilder
+    private func bar(pct: Double, tint: Color) -> some View {
+        GeometryReader { geo in
+            ZStack(alignment: .leading) {
+                Capsule().fill(DS.Colors.textFaint.opacity(0.15))
+                Capsule().fill(tint).frame(width: max(2, geo.size.width * pct))
+            }
+        }
+        .frame(height: 6)
+    }
+}
+
+// MARK: - Supplement Shelf (v155 — one tap logs a discrete dose, not a food entry)
+
+private struct SupplementShelfCard: View {
+    let items: [SupabaseClient.SupplementShelfItem]
+    let onLog: (SupabaseClient.SupplementShelfItem) -> Void
+
+    private var takenCount: Int { items.filter { $0.takenToday > 0 }.count }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: DS.Spacing.sm) {
+            HStack {
+                Text("SUPPLEMENTS")
+                    .font(DS.Font.label)
+                    .foregroundStyle(DS.Colors.textMuted)
+                    .tracking(0.8)
+                Spacer()
+                Text("\(takenCount)/\(items.count) today")
+                    .font(.system(size: 11, weight: .semibold, design: .rounded))
+                    .foregroundStyle(takenCount == items.count ? DS.Colors.success : DS.Colors.textFaint)
+                    .monospacedDigit()
+            }
+
+            VStack(spacing: 0) {
+                ForEach(Array(items.enumerated()), id: \.element.id) { idx, item in
+                    if idx > 0 { Divider().opacity(0.25) }
+                    SupplementRow(item: item, onLog: { onLog(item) })
+                }
+            }
+        }
+        .glassCard()
+    }
+}
+
+private struct SupplementRow: View {
+    let item: SupabaseClient.SupplementShelfItem
+    let onLog: () -> Void
+
+    private var isDone: Bool {
+        guard let t = item.targetDaily, t > 0 else { return item.takenToday > 0 }
+        return item.takenToday >= t
+    }
+
+    var body: some View {
+        HStack(spacing: DS.Spacing.sm) {
+            Image(systemName: isDone ? "checkmark.circle.fill" : "circle")
+                .font(.system(size: 17))
+                .foregroundStyle(isDone ? DS.Colors.success : DS.Colors.textFaint)
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text(item.name)
+                    .font(.system(size: 14, weight: .medium, design: .rounded))
+                    .foregroundStyle(DS.Colors.textPrimary)
+                    .lineLimit(1)
+                if !item.doseSummary.isEmpty {
+                    Text(item.doseSummary)
+                        .font(.system(size: 11, design: .rounded))
+                        .foregroundStyle(DS.Colors.textMuted)
+                        .lineLimit(1)
+                }
+            }
+
+            Spacer()
+
+            if item.takenToday > 0 {
+                Text("×\(SupabaseClient.SupplementShelfItem.trim(item.takenToday))")
+                    .font(.system(size: 11, weight: .semibold, design: .monospaced))
+                    .foregroundStyle(DS.Colors.textFaint)
+            }
+
+            Button {
+                DS.Haptic.tap()
+                onLog()
+            } label: {
+                Image(systemName: "plus")
+                    .font(.system(size: 13, weight: .bold))
+                    .foregroundStyle(DS.Colors.violet)
+                    .frame(width: 30, height: 30)
+                    .background(Circle().fill(DS.Colors.violet.opacity(0.12)))
+            }
+            .buttonStyle(.plain)
+        }
+        .padding(.vertical, DS.Spacing.sm)
     }
 }
 

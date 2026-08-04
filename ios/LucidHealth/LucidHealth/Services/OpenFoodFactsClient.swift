@@ -21,6 +21,8 @@ struct OpenFoodFactsProduct: Codable {
     var ingredientsText: String?
     var nutriscore: String?
     var servingSizeG: Int?
+    /// Carried through so the supplement shelf can key on it (v155).
+    var barcode: String?
 }
 
 private struct OFFResponse: Decodable {
@@ -89,7 +91,8 @@ struct OpenFoodFactsClient {
             novaGroup: p.nova_group,
             ingredientsText: p.ingredients_text,
             nutriscore: p.nutriscore_grade?.uppercased(),
-            servingSizeG: servingGrams
+            servingSizeG: servingGrams,
+            barcode: barcode
         )
     }
 }

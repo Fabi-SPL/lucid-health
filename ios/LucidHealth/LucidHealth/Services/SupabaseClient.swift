@@ -3339,6 +3339,171 @@ extension SupabaseClient {
                             novaClass: product.novaGroup ?? 4, mindTags: [])
     }
 
+    // MARK: - Supplements (v155)
+
+    /// A shelf row: the product plus how much of it went in today.
+    struct SupplementShelfItem: Identifiable, Hashable {
+        let id: String
+        let name: String
+        let brand: String?
+        let form: String
+        let servingUnit: String
+        let actives: [String: Double]
+        let targetDaily: Double?
+        let takenToday: Double
+        let lastTaken: Date?
+
+        /// "5 g creatine_g" style summary for one serving.
+        var doseSummary: String {
+            actives.sorted { $0.key < $1.key }
+                .map { "\(Self.trim($0.value)) \($0.key.replacingOccurrences(of: "_", with: " "))" }
+                .joined(separator: " · ")
+        }
+
+        static func trim(_ v: Double) -> String {
+            v == v.rounded() ? String(Int(v)) : String(format: "%.1f", v)
+        }
+    }
+
+    /// The number that gives food logging a reason to exist (v156).
+    struct CutStatus {
+        let tdee: Int
+        let bmr: Int
+        let activeKcal: Int
+        let deficitTarget: Int
+        let targetIntake: Int
+        let consumed: Int
+        let remaining: Int
+        let proteinG: Double
+        let proteinTarget: Int
+        let nMeals: Int
+        let headline: String
+
+        var proteinPct: Double {
+            proteinTarget > 0 ? min(proteinG / Double(proteinTarget), 1) : 0
+        }
+        var intakePct: Double {
+            targetIntake > 0 ? min(Double(consumed) / Double(targetIntake), 1) : 0
+        }
+        var isOver: Bool { remaining < 0 }
+    }
+
+    func cutStatus() async throws -> CutStatus? {
+        let rows = try await rpcRows("cut_status", ["p_user_id": userId])
+        guard let r = rows.first else { return nil }
+        func i(_ k: String) -> Int { (r[k] as? NSNumber)?.intValue ?? Int(r[k] as? String ?? "") ?? 0 }
+        func d(_ k: String) -> Double { (r[k] as? NSNumber)?.doubleValue ?? Double(r[k] as? String ?? "") ?? 0 }
+
+        return CutStatus(
+            tdee: i("tdee"), bmr: i("bmr"), activeKcal: i("active_kcal"),
+            deficitTarget: i("deficit_target"), targetIntake: i("target_intake"),
+            consumed: i("consumed"), remaining: i("remaining"),
+            proteinG: d("protein_g"), proteinTarget: i("protein_target"),
+            nMeals: i("n_meals"), headline: r["headline"] as? String ?? ""
+        )
+    }
+
+    /// POST an RPC and hand back the raw rows.
+    private func rpcRows(_ name: String, _ body: [String: Any]) async throws -> [[String: Any]] {
+        try await ensureAuth()
+        guard let token = accessToken else {
+            throw NSError(domain: "Supabase", code: 401,
+                          userInfo: [NSLocalizedDescriptionKey: "Not authenticated"])
+        }
+
+        let url = URL(string: "\(baseURL)/rest/v1/rpc/\(name)")!
+        var req = URLRequest(url: url)
+        req.httpMethod = "POST"
+        req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        req.setValue(anonKey, forHTTPHeaderField: "apikey")
+        req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        req.httpBody = try JSONSerialization.data(withJSONObject: body)
+
+        let (data, resp) = try await session.data(for: req)
+        let code = (resp as? HTTPURLResponse)?.statusCode ?? 0
+        guard code < 300 else {
+            let msg = String(data: data, encoding: .utf8) ?? ""
+            log("\(name) HTTP \(code): \(msg)")
+            throw NSError(domain: "Supabase", code: code,
+                          userInfo: [NSLocalizedDescriptionKey: msg])
+        }
+
+        // RETURNS TABLE gives an array of objects; RETURNS uuid gives a bare JSON
+        // scalar. Normalise the scalar into a one-key row so callers stay simple.
+        let json = try? JSONSerialization.jsonObject(with: data, options: [.fragmentsAllowed])
+        if let arr = json as? [[String: Any]] { return arr }
+        if let obj = json as? [String: Any] { return [obj] }
+        if let scalar = json as? String { return [["value": scalar]] }
+        return []
+    }
+
+    func supplementShelf() async throws -> [SupplementShelfItem] {
+        let rows = try await rpcRows("supplement_shelf", ["p_user_id": userId])
+        let iso = ISO8601DateFormatter()
+        iso.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+
+        return rows.compactMap { r in
+            guard let id = r["id"] as? String, let name = r["name"] as? String else { return nil }
+            var actives: [String: Double] = [:]
+            if let raw = r["actives"] as? [String: Any] {
+                for (k, v) in raw {
+                    if let d = v as? Double { actives[k] = d }
+                    else if let n = v as? NSNumber { actives[k] = n.doubleValue }
+                    else if let s = v as? String, let d = Double(s) { actives[k] = d }
+                }
+            }
+            let taken = (r["taken_today"] as? NSNumber)?.doubleValue
+                ?? Double(r["taken_today"] as? String ?? "0") ?? 0
+            let target = (r["target_daily"] as? NSNumber)?.doubleValue
+                ?? Double(r["target_daily"] as? String ?? "")
+
+            return SupplementShelfItem(
+                id: id,
+                name: name,
+                brand: r["brand"] as? String,
+                form: r["form"] as? String ?? "capsule",
+                servingUnit: r["serving_unit"] as? String ?? "capsule",
+                actives: actives,
+                targetDaily: target,
+                takenToday: taken,
+                lastTaken: (r["last_taken"] as? String).flatMap { iso.date(from: $0) }
+            )
+        }
+    }
+
+    @discardableResult
+    func logSupplement(productId: String, servings: Double = 1, source: String = "tap") async throws -> String? {
+        let rows = try await rpcRows("log_supplement", [
+            "p_user_id": userId,
+            "p_product_id": productId,
+            "p_servings": servings,
+            "p_source": source,
+        ])
+        return rows.first?.values.first as? String
+    }
+
+    /// Save a scanned/photographed product to the shelf. `actives` is free-form
+    /// because German supplement labels do not agree on a schema.
+    @discardableResult
+    func upsertSupplementProduct(name: String, barcode: String? = nil, brand: String? = nil,
+                                 form: String = "capsule", servingUnit: String = "capsule",
+                                 servingSize: Double = 1, actives: [String: Double] = [:],
+                                 source: String = "manual") async throws -> String? {
+        var body: [String: Any] = [
+            "p_user_id": userId,
+            "p_name": name,
+            "p_form": form,
+            "p_serving_unit": servingUnit,
+            "p_serving_size": servingSize,
+            "p_actives": actives,
+            "p_source": source,
+        ]
+        if let barcode { body["p_barcode"] = barcode }
+        if let brand { body["p_brand"] = brand }
+        let rows = try await rpcRows("upsert_supplement_product", body)
+        return rows.first?.values.first as? String
+    }
+
     /// Save a multi-source meal built from several items (barcode + described +
     /// photo) as ONE food_entry (source "combined").
     func saveCombinedMeal(items: [DetectedItem], caption: String, capturedAt: Date = Date()) async throws -> FoodEntry {
