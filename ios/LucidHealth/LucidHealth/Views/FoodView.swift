@@ -27,6 +27,9 @@ struct FoodView: View {
     @State private var quickEdit: QuickLogSource?
     @State private var shelf: [SupabaseClient.SupplementShelfItem] = []
     @State private var cut: SupabaseClient.CutStatus?
+    @State private var pots: [SupabaseClient.FoodPot] = []
+    @State private var ingredients: [SupabaseClient.FoodIngredient] = []
+    @State private var showPotBuilder = false
 
     private var todayEntries: [FoodEntry] { entries.filter(isToday) }
     private var todayKcal: Int { entries.filter(isToday).compactMap(\.totalKcal).reduce(0, +) }
@@ -104,6 +107,17 @@ struct FoodView: View {
                             .listRowBackground(Color.clear)
                             .listRowSeparator(.hidden)
                     }
+
+                    PotSection(
+                        pots: pots,
+                        onServe: { pot, f in Task { await serve(pot, f) } },
+                        onCook: { showPotBuilder = true }
+                    )
+                    .padding(.horizontal, DS.Spacing.md)
+                    .padding(.top, DS.Spacing.md)
+                    .listRowInsets(EdgeInsets())
+                    .listRowBackground(Color.clear)
+                    .listRowSeparator(.hidden)
 
                     FavoritesBar(
                         favorites: favorites,
@@ -218,11 +232,17 @@ struct FoodView: View {
                 entries.insert(entry, at: 0)
             }
         }
+        .fullScreenCover(isPresented: $showPotBuilder) {
+            PotBuilderSheet(ingredients: ingredients) {
+                Task { await loadPots() }
+            }
+        }
         .task {
             await loadEntries()
             await loadFavorites()
             await loadShelf()
             await loadCut()
+            await loadPots()
             withAnimation { appeared = true }
         }
         .sensoryFeedback(.success, trigger: saveSuccessCount)
@@ -411,6 +431,28 @@ struct FoodView: View {
         }
     }
 
+    private func loadPots() async {
+        if let p = try? await SupabaseClient.shared.openPots() { pots = p }
+        if ingredients.isEmpty,
+           let i = try? await SupabaseClient.shared.fetchIngredients() { ingredients = i }
+    }
+
+    /// Eat a fraction of an open pot. The server writes a normal food_entries
+    /// row and decrements what is left, so every other surface just works.
+    private func serve(_ pot: SupabaseClient.FoodPot, _ fraction: Double) async {
+        do {
+            try await SupabaseClient.shared.servePot(id: pot.id, fraction: fraction)
+            DS.Haptic.success()
+            saveSuccessCount += 1
+            await loadPots()
+            await loadEntries()
+            await loadCut()
+        } catch {
+            self.error = "Couldn't log that portion"
+            saveErrorCount += 1
+        }
+    }
+
     private func logSupplement(_ item: SupabaseClient.SupplementShelfItem) async {
         do {
             try await SupabaseClient.shared.logSupplement(productId: item.id)
@@ -454,6 +496,416 @@ struct FoodView: View {
 
 }
 
+// MARK: - Pot (v159) — weigh once at the stove, then eat fractions
+//
+// Batch cooking isn't a logging problem, it's the most accurate method he has:
+// once it's stirred you can't weigh the components back out, but you don't need
+// to — the ratio is uniform, and a fraction of a weighed total beats a gram
+// guess every time. One weighing covers 2-4 meals.
+
+private struct PotSection: View {
+    let pots: [SupabaseClient.FoodPot]
+    let onServe: (SupabaseClient.FoodPot, Double) -> Void
+    let onCook: () -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: DS.Spacing.sm) {
+            HStack {
+                Text("IN THE POT")
+                    .font(DS.Font.label)
+                    .foregroundStyle(DS.Colors.textMuted)
+                    .tracking(0.8)
+                Spacer()
+                Button {
+                    DS.Haptic.tap()
+                    onCook()
+                } label: {
+                    HStack(spacing: 4) {
+                        Image(systemName: "flame.fill").font(.system(size: 10, weight: .bold))
+                        Text("Cook").font(.system(size: 11, weight: .semibold, design: .rounded))
+                    }
+                    .foregroundStyle(DS.Colors.violet)
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 5)
+                    .background(Capsule().fill(DS.Colors.violet.opacity(0.12)))
+                }
+                .buttonStyle(.plain)
+            }
+
+            if pots.isEmpty {
+                Text("Weigh the pan once. Then every serving is a fraction, not a guess.")
+                    .font(.system(size: 12, design: .rounded))
+                    .foregroundStyle(DS.Colors.textMuted)
+                    .fixedSize(horizontal: false, vertical: true)
+            } else {
+                VStack(spacing: 0) {
+                    ForEach(Array(pots.enumerated()), id: \.element.id) { idx, pot in
+                        if idx > 0 { Divider().opacity(0.25) }
+                        PotRow(pot: pot, onServe: { f in onServe(pot, f) })
+                    }
+                }
+            }
+        }
+        .glassCard()
+    }
+}
+
+private struct PotRow: View {
+    let pot: SupabaseClient.FoodPot
+    let onServe: (Double) -> Void
+
+    /// Fractions are of the WHOLE pot, not of what's left — that's how the
+    /// server stores them, and it's how you actually think at the stove.
+    private static let fractions: [(String, Double)] = [("¼", 0.25), ("⅓", 1.0 / 3.0), ("½", 0.5)]
+
+    private var cookedNote: String {
+        let cal = Calendar.current
+        let days = cal.dateComponents([.day],
+                                      from: cal.startOfDay(for: pot.cookedAt),
+                                      to: cal.startOfDay(for: Date())).day ?? 0
+        switch days {
+        case 0:  return "cooked today"
+        case 1:  return "cooked yesterday"
+        default: return "cooked \(days)d ago"
+        }
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: DS.Spacing.sm) {
+            HStack(spacing: DS.Spacing.sm) {
+                Text(pot.emoji ?? "🍲").font(.system(size: 20))
+
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(pot.name)
+                        .font(.system(size: 14, weight: .semibold, design: .rounded))
+                        .foregroundStyle(DS.Colors.textPrimary)
+                        .lineLimit(1)
+                    Text("\(Int(pot.leftKcal.rounded())) kcal · \(Int(pot.leftProtein.rounded())) g P left · \(cookedNote)")
+                        .font(.system(size: 11, design: .rounded))
+                        .foregroundStyle(DS.Colors.textMuted)
+                        .lineLimit(1)
+                }
+
+                Spacer()
+
+                Text("\(pot.remainingPct)%")
+                    .font(.system(size: 12, weight: .bold, design: .monospaced))
+                    .foregroundStyle(DS.Colors.teal)
+            }
+
+            GeometryReader { geo in
+                ZStack(alignment: .leading) {
+                    Capsule().fill(DS.Colors.textFaint.opacity(0.15))
+                    Capsule().fill(DS.Colors.teal)
+                        .frame(width: max(2, geo.size.width * min(1, max(0, pot.remaining))))
+                }
+            }
+            .frame(height: 5)
+
+            HStack(spacing: 6) {
+                ForEach(Array(Self.fractions.enumerated()), id: \.offset) { _, item in
+                    servePill(item.0,
+                              kcal: Int((pot.totalKcal * item.1).rounded()),
+                              enabled: item.1 <= pot.remaining + 0.01) { onServe(item.1) }
+                }
+                servePill("Rest",
+                          kcal: Int(pot.leftKcal.rounded()),
+                          enabled: pot.remaining > 0.01) { onServe(pot.remaining) }
+            }
+        }
+        .padding(.vertical, DS.Spacing.sm)
+    }
+
+    private func servePill(_ label: String, kcal: Int, enabled: Bool, action: @escaping () -> Void) -> some View {
+        Button {
+            DS.Haptic.commit()
+            action()
+        } label: {
+            VStack(spacing: 1) {
+                Text(label).font(.system(size: 13, weight: .bold, design: .rounded))
+                Text("\(kcal)").font(.system(size: 9, weight: .medium, design: .monospaced))
+            }
+            .foregroundStyle(enabled ? DS.Colors.textPrimary : DS.Colors.textFaint)
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 7)
+            .background(
+                RoundedRectangle(cornerRadius: DS.Radius.sm, style: .continuous)
+                    .fill(DS.Colors.surfaceElevated)
+            )
+        }
+        .buttonStyle(.plain)
+        .disabled(!enabled)
+        .opacity(enabled ? 1 : 0.4)
+    }
+}
+
+/// One weighed ingredient in a pot being built.
+private struct PotDraftItem: Identifiable {
+    let id = UUID()
+    let key: String
+    let name: String
+    let kcal100: Double
+    let protein100: Double
+    let basis: String?
+    var grams: Double
+
+    var kcal: Double { grams / 100 * kcal100 }
+    var protein: Double { grams / 100 * protein100 }
+}
+
+private struct PotBuilderSheet: View {
+    let ingredients: [SupabaseClient.FoodIngredient]
+    let onSaved: () -> Void
+    @Environment(\.dismiss) private var dismiss
+
+    @State private var name = ""
+    @State private var emoji = "🍲"
+    @State private var items: [PotDraftItem] = []
+    @State private var search = ""
+    @State private var isSaving = false
+    @State private var error: String?
+
+    private static let emojis = ["🍲", "🍚", "🍗", "🍝", "🥘", "🍛", "🥣", "🍜"]
+
+    private var totalKcal: Int { Int(items.reduce(0) { $0 + $1.kcal }.rounded()) }
+    private var totalProtein: Int { Int(items.reduce(0) { $0 + $1.protein }.rounded()) }
+
+    private var filtered: [SupabaseClient.FoodIngredient] {
+        let q = search.trimmingCharacters(in: .whitespaces).lowercased()
+        guard !q.isEmpty else { return ingredients }
+        return ingredients.filter {
+            $0.name.lowercased().contains(q) || ($0.nameLocal?.lowercased().contains(q) ?? false)
+        }
+    }
+
+    private var resolvedName: String {
+        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !trimmed.isEmpty { return trimmed }
+        return items.prefix(2).map(\.name).joined(separator: " + ")
+    }
+
+    var body: some View {
+        NavigationStack {
+            ScrollView(showsIndicators: false) {
+                VStack(spacing: DS.Spacing.lg) {
+                    Color.clear.frame(height: 2)
+                    nameCard
+                    if !items.isEmpty { draftCard }
+                    pickerCard
+                    if let error {
+                        AlertBanner(icon: "exclamationmark.triangle", message: error, color: DS.Colors.pink)
+                    }
+                    saveButton
+                    Color.clear.frame(height: DS.Spacing.lg)
+                }
+                .padding(.horizontal, DS.Spacing.md)
+            }
+            .background(AuroraBackground().ignoresSafeArea())
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .principal) {
+                    TwoToneHeadline(primary: "Cook", secondary: " · a pot", font: .system(size: 17, weight: .heavy, design: .rounded))
+                }
+                ToolbarItem(placement: .navigationBarLeading) {
+                    Button("Cancel") { dismiss() }.foregroundStyle(DS.Colors.textSecondary)
+                }
+            }
+        }
+    }
+
+    private var nameCard: some View {
+        VStack(alignment: .leading, spacing: DS.Spacing.sm) {
+            SectionHeader(icon: "text.cursor", title: "POT NAME", iconColor: DS.Colors.violet)
+            TextField("e.g. Chicken + rice", text: $name)
+                .font(.system(size: 14, weight: .medium))
+                .padding(.horizontal, 12).padding(.vertical, 10)
+                .background(DS.Colors.surfaceElevated)
+                .clipShape(RoundedRectangle(cornerRadius: DS.Radius.md, style: .continuous))
+                .foregroundStyle(DS.Colors.textPrimary)
+
+            HStack(spacing: 6) {
+                ForEach(Self.emojis, id: \.self) { e in
+                    Button {
+                        DS.Haptic.select()
+                        emoji = e
+                    } label: {
+                        Text(e)
+                            .font(.system(size: 18))
+                            .frame(width: 34, height: 34)
+                            .background(
+                                Circle().fill(emoji == e ? DS.Colors.violet.opacity(0.18) : DS.Colors.surfaceElevated)
+                            )
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+        }
+        .padding(DS.Spacing.md).glassDefault()
+    }
+
+    private var draftCard: some View {
+        VStack(alignment: .leading, spacing: DS.Spacing.sm) {
+            SectionHeader(icon: "scalemass", title: "WEIGHED IN", iconColor: DS.Colors.teal,
+                          trailing: "\(totalKcal) kcal · \(totalProtein) g P")
+
+            ForEach($items) { $item in
+                HStack(spacing: DS.Spacing.sm) {
+                    VStack(alignment: .leading, spacing: 1) {
+                        Text(item.name)
+                            .font(.system(size: 13, weight: .medium, design: .rounded))
+                            .foregroundStyle(DS.Colors.textPrimary)
+                            .lineLimit(1)
+                        Text(Self.subline(kcal: item.kcal, basis: item.basis))
+                            .font(.system(size: 10, design: .rounded))
+                            .foregroundStyle(DS.Colors.textMuted)
+                    }
+
+                    Spacer()
+
+                    TextField("g", value: $item.grams, format: .number)
+                        .keyboardType(.decimalPad)
+                        .multilineTextAlignment(.trailing)
+                        .font(.system(size: 14, weight: .semibold, design: .monospaced))
+                        .foregroundStyle(DS.Colors.textPrimary)
+                        .frame(width: 62)
+                        .padding(.horizontal, 8).padding(.vertical, 6)
+                        .background(DS.Colors.surfaceElevated)
+                        .clipShape(RoundedRectangle(cornerRadius: DS.Radius.sm, style: .continuous))
+
+                    Text("g")
+                        .font(.system(size: 11, design: .rounded))
+                        .foregroundStyle(DS.Colors.textMuted)
+
+                    Button {
+                        DS.Haptic.tap()
+                        items.removeAll { $0.id == item.id }
+                    } label: {
+                        Image(systemName: "minus.circle.fill")
+                            .font(.system(size: 17))
+                            .foregroundStyle(DS.Colors.textFaint)
+                    }
+                    .buttonStyle(.plain)
+                }
+                .padding(.vertical, 4)
+            }
+        }
+        .padding(DS.Spacing.md).glassDefault()
+    }
+
+    private var pickerCard: some View {
+        VStack(alignment: .leading, spacing: DS.Spacing.sm) {
+            SectionHeader(icon: "list.bullet", title: "ADD INGREDIENT", iconColor: DS.Colors.amber)
+
+            TextField("Search", text: $search)
+                .font(.system(size: 13))
+                .padding(.horizontal, 12).padding(.vertical, 8)
+                .background(DS.Colors.surfaceElevated)
+                .clipShape(RoundedRectangle(cornerRadius: DS.Radius.md, style: .continuous))
+                .foregroundStyle(DS.Colors.textPrimary)
+
+            LazyVGrid(columns: [GridItem(.flexible(), spacing: 6), GridItem(.flexible(), spacing: 6)], spacing: 6) {
+                ForEach(filtered.prefix(search.isEmpty ? 12 : 24)) { ing in
+                    Button {
+                        DS.Haptic.tap()
+                        add(ing)
+                    } label: {
+                        VStack(alignment: .leading, spacing: 1) {
+                            Text(ing.display)
+                                .font(.system(size: 12, weight: .semibold, design: .rounded))
+                                .foregroundStyle(DS.Colors.textPrimary)
+                                .lineLimit(1)
+                            Text(Self.per100(kcal: ing.kcal100, basis: ing.basisNote))
+                                .font(.system(size: 9, design: .rounded))
+                                .foregroundStyle(DS.Colors.textMuted)
+                                .lineLimit(1)
+                        }
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(.horizontal, 10).padding(.vertical, 8)
+                        .background(
+                            RoundedRectangle(cornerRadius: DS.Radius.sm, style: .continuous)
+                                .fill(DS.Colors.surfaceElevated)
+                        )
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+
+            if ingredients.isEmpty {
+                Text("No ingredients loaded — pull to refresh the Food tab.")
+                    .font(.system(size: 11, design: .rounded))
+                    .foregroundStyle(DS.Colors.textMuted)
+            }
+        }
+        .padding(DS.Spacing.md).glassDefault()
+    }
+
+    private var saveButton: some View {
+        Button {
+            Task { await save() }
+        } label: {
+            HStack(spacing: 8) {
+                if isSaving { ProgressView().tint(.white) }
+                Text(isSaving ? "Saving…" : "Save pot · \(totalKcal) kcal")
+                    .font(.system(size: 15, weight: .bold, design: .rounded))
+            }
+            .foregroundStyle(.white)
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, DS.Spacing.md)
+            .background(
+                RoundedRectangle(cornerRadius: DS.Radius.md, style: .continuous)
+                    .fill(DS.Colors.violet)
+            )
+        }
+        .buttonStyle(.plain)
+        .disabled(items.isEmpty || isSaving)
+        .opacity(items.isEmpty || isSaving ? 0.5 : 1)
+    }
+
+    private static func subline(kcal: Double, basis: String?) -> String {
+        let base = "\(Int(kcal.rounded())) kcal"
+        guard let basis else { return base }
+        return base + " · weigh " + basis
+    }
+
+    private static func per100(kcal: Double, basis: String?) -> String {
+        let base = "\(Int(kcal.rounded())) kcal/100"
+        guard let basis else { return base }
+        return base + " · " + basis
+    }
+
+    private func add(_ ing: SupabaseClient.FoodIngredient) {
+        guard !items.contains(where: { $0.key == ing.id }) else { return }
+        items.append(PotDraftItem(
+            key: ing.id,
+            name: ing.display,
+            kcal100: ing.kcal100,
+            protein100: ing.protein100,
+            basis: ing.basisNote,
+            grams: ing.defaultGrams ?? 100
+        ))
+    }
+
+    private func save() async {
+        guard !items.isEmpty else { return }
+        isSaving = true
+        error = nil
+        do {
+            try await SupabaseClient.shared.createPot(
+                name: resolvedName,
+                emoji: emoji,
+                items: items.map { ($0.key, $0.grams) }
+            )
+            DS.Haptic.success()
+            onSaved()
+            dismiss()
+        } catch {
+            self.error = "Couldn't save the pot"
+            DS.Haptic.error()
+        }
+        isSaving = false
+    }
+}
+
 // MARK: - Favorites Bar (one-tap quick log, most-used first)
 
 private struct FavoritesBar: View {
@@ -462,12 +914,35 @@ private struct FavoritesBar: View {
     let onLog: (QuickLogItem) -> Void
     let onLogFavorite: (FoodFavorite) -> Void
 
-    /// Curated presets, re-sorted so the items you log most float to the front.
+    /// Strip punctuation/parentheticals so "Fusilli, Kochschinken & Cheese" and
+    /// "Fusilli (dry), Kochschinken, Cheddar & cheese mix" collapse to the same
+    /// key. Saving the same dish twice with a slightly different name is the
+    /// normal way this list rots.
+    private static func dedupeKey(_ s: String) -> String {
+        s.lowercased()
+            .replacingOccurrences(of: #"\([^)]*\)"#, with: "", options: .regularExpression)
+            .replacingOccurrences(of: #"[^a-z0-9äöüß]+"#, with: " ", options: .regularExpression)
+            .split(separator: " ").sorted().joined(separator: " ")
+    }
+
+    /// Favourites, one per dish. Most-logged wins a tie so the pill that
+    /// survives is the one he actually taps.
+    private var uniqueFavorites: [FoodFavorite] {
+        var seen = Set<String>()
+        return favorites
+            .sorted { ($0.timesLogged ?? 0) > ($1.timesLogged ?? 0) }
+            .filter { seen.insert(Self.dedupeKey($0.name)).inserted }
+    }
+
+    /// Curated presets, re-sorted so the items you log most float to the front,
+    /// minus anything already covered by a saved meal — the duplicate pills in
+    /// one horizontal strip were the whole reason this bar felt scuffed.
     private var items: [QuickLogItem] {
         let counts = Dictionary(history.entries.map { ($0.name, $0.count) }, uniquingKeysWith: { a, _ in a })
-        return QuickLogItem.defaults.sorted {
-            (counts[$0.name.lowercased()] ?? 0) > (counts[$1.name.lowercased()] ?? 0)
-        }
+        let taken = Set(uniqueFavorites.map { Self.dedupeKey($0.name) })
+        return QuickLogItem.defaults
+            .filter { !taken.contains(Self.dedupeKey($0.name)) }
+            .sorted { (counts[$0.name.lowercased()] ?? 0) > (counts[$1.name.lowercased()] ?? 0) }
     }
 
     var body: some View {
@@ -480,7 +955,7 @@ private struct FavoritesBar: View {
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: DS.Spacing.sm) {
                     // User's saved meals first (violet-tinted), then curated presets.
-                    ForEach(favorites) { fav in
+                    ForEach(uniqueFavorites) { fav in
                         FavoritePill(favorite: fav) { onLogFavorite(fav) }
                     }
                     ForEach(items) { item in

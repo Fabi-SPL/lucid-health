@@ -3437,6 +3437,125 @@ extension SupabaseClient {
         return []
     }
 
+    // MARK: - Pot (v159) — weigh once at the stove, then eat fractions
+
+    /// One canonical row per thing Fabi actually eats. Server-side, hardcoded,
+    /// never re-estimated — which is what makes "does the brand matter?" a
+    /// question he no longer has to answer at every meal.
+    struct FoodIngredient: Identifiable, Hashable {
+        let id: String          // key
+        let name: String
+        let nameLocal: String?
+        let kcal100: Double
+        let protein100: Double
+        let defaultGrams: Double?
+        let unitHint: String?
+        let weightBasis: String  // raw | dry | ready | liquid
+        let novaClass: Int
+
+        var display: String { nameLocal ?? name }
+        /// "weigh raw" / "weigh dry" is the whole trick — raw weight is easier to
+        /// measure and survives cooking, water does not.
+        var basisNote: String? {
+            switch weightBasis {
+            case "raw": return "raw"
+            case "dry": return "dry"
+            case "liquid": return "ml"
+            default: return nil
+            }
+        }
+    }
+
+    struct FoodPot: Identifiable {
+        let id: String
+        let name: String
+        let emoji: String?
+        let cookedAt: Date
+        let remaining: Double
+        let totalKcal: Double
+        let totalProtein: Double
+        let leftKcal: Double
+        let leftProtein: Double
+
+        var remainingPct: Int { Int((remaining * 100).rounded()) }
+    }
+
+    func fetchIngredients() async throws -> [FoodIngredient] {
+        try await ensureAuth()
+        guard let token = accessToken else { return [] }
+        var comps = URLComponents(string: "\(baseURL)/rest/v1/food_ingredients")!
+        comps.queryItems = [
+            URLQueryItem(name: "user_id", value: "eq.\(userId)"),
+            URLQueryItem(name: "order", value: "times_used.desc,name.asc")
+        ]
+        var req = URLRequest(url: comps.url!)
+        req.setValue(anonKey, forHTTPHeaderField: "apikey")
+        req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        let (data, _) = try await session.data(for: req)
+        let rows = (try? JSONSerialization.jsonObject(with: data)) as? [[String: Any]] ?? []
+
+        func d(_ r: [String: Any], _ k: String) -> Double {
+            (r[k] as? NSNumber)?.doubleValue ?? Double(r[k] as? String ?? "") ?? 0
+        }
+        return rows.compactMap { r in
+            guard let key = r["key"] as? String, let name = r["name"] as? String else { return nil }
+            let def = (r["default_grams"] as? NSNumber)?.doubleValue
+                ?? Double(r["default_grams"] as? String ?? "")
+            return FoodIngredient(
+                id: key, name: name, nameLocal: r["name_local"] as? String,
+                kcal100: d(r, "kcal_100"), protein100: d(r, "protein_100"),
+                defaultGrams: def, unitHint: r["unit_hint"] as? String,
+                weightBasis: r["weight_basis"] as? String ?? "ready",
+                novaClass: (r["nova_class"] as? NSNumber)?.intValue ?? 1
+            )
+        }
+    }
+
+    func openPots() async throws -> [FoodPot] {
+        let rows = try await rpcRows("food_batches_open", ["p_user_id": userId])
+        let iso = ISO8601DateFormatter()
+        iso.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        let isoPlain = ISO8601DateFormatter()
+        isoPlain.formatOptions = [.withInternetDateTime]
+
+        func d(_ r: [String: Any], _ k: String) -> Double {
+            (r[k] as? NSNumber)?.doubleValue ?? Double(r[k] as? String ?? "") ?? 0
+        }
+        return rows.compactMap { r in
+            guard let id = r["id"] as? String, let name = r["name"] as? String else { return nil }
+            let raw = r["cooked_at"] as? String ?? ""
+            let when = iso.date(from: raw) ?? isoPlain.date(from: raw) ?? Date()
+            return FoodPot(
+                id: id, name: name, emoji: r["emoji"] as? String, cookedAt: when,
+                remaining: d(r, "remaining"), totalKcal: d(r, "total_kcal"),
+                totalProtein: d(r, "total_protein"),
+                leftKcal: d(r, "left_kcal"), leftProtein: d(r, "left_protein")
+            )
+        }
+    }
+
+    /// items: [(ingredient key, grams)]
+    @discardableResult
+    func createPot(name: String, emoji: String?, items: [(String, Double)]) async throws -> String? {
+        let payload = items.map { ["key": $0.0, "grams": $0.1] as [String: Any] }
+        var body: [String: Any] = ["p_name": name, "p_items": payload]
+        if let emoji { body["p_emoji"] = emoji }
+        let rows = try await rpcRows("food_batch_create", body)
+        return rows.first?["id"] as? String
+    }
+
+    @discardableResult
+    func servePot(id: String, fraction: Double, at date: Date = Date()) async throws -> String? {
+        let iso = ISO8601DateFormatter()
+        iso.formatOptions = [.withInternetDateTime]
+        let rows = try await rpcRows("food_batch_serve", [
+            "p_batch_id": id,
+            "p_fraction": fraction,
+            "p_captured_at": iso.string(from: date)
+        ])
+        return rows.first?["value"] as? String ?? rows.first?["id"] as? String
+    }
+
     func supplementShelf() async throws -> [SupplementShelfItem] {
         let rows = try await rpcRows("supplement_shelf", ["p_user_id": userId])
         let iso = ISO8601DateFormatter()

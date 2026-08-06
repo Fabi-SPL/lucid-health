@@ -15,6 +15,9 @@ struct FoodFavorite: Codable, Identifiable {
     var source: String?
     var confidence: String?
     var sortOrder: Int?
+    /// Used to pick the survivor when two saved meals are the same dish under
+    /// slightly different names — the one he actually taps wins.
+    var timesLogged: Int?
 
     enum CodingKeys: String, CodingKey {
         case id, name, emoji, items
@@ -24,5 +27,6 @@ struct FoodFavorite: Codable, Identifiable {
         case servingNote = "serving_note"
         case source, confidence
         case sortOrder = "sort_order"
+        case timesLogged = "times_logged"
     }
 }
