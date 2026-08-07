@@ -19,6 +19,14 @@ struct FoodFavorite: Codable, Identifiable {
     /// slightly different names — the one he actually taps wins.
     var timesLogged: Int?
 
+    /// Portion multipliers offered at log time. Saving the same dish at a second
+    /// size is what produced two "Fusilli" favorites 884 kcal apart.
+    static let scales: [(String, Double)] = [("½", 0.5), ("¾", 0.75), ("1×", 1.0), ("1½", 1.5), ("2×", 2.0)]
+
+    static func scaleLabel(_ f: Double) -> String {
+        scales.first { abs($0.1 - f) < 0.001 }?.0 ?? String(format: "%.2g×", f)
+    }
+
     enum CodingKeys: String, CodingKey {
         case id, name, emoji, items
         case totalKcal = "total_kcal"

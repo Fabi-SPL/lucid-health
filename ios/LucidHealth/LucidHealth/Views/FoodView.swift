@@ -2329,6 +2329,7 @@ private struct QuickLogEditorSheet: View {
     @State private var isSaving = false
     @State private var error: String?
     @State private var portion: PortionSize = .normal
+    @State private var favScale: Double = 1.0
 
     @Environment(\.dismiss) private var dismiss
 
@@ -2463,17 +2464,41 @@ private struct QuickLogEditorSheet: View {
     }
 
     private var favoriteSummary: some View {
-        VStack(alignment: .leading, spacing: DS.Spacing.xs) {
+        VStack(alignment: .leading, spacing: DS.Spacing.sm) {
             Text(name)
                 .font(.system(size: 16, weight: .semibold, design: .rounded))
                 .foregroundStyle(DS.Colors.textPrimary)
             HStack(spacing: DS.Spacing.sm) {
                 if kcal > 0 {
-                    Label("\(kcal) kcal", systemImage: "flame.fill")
+                    Label("\(Int((Double(kcal) * favScale).rounded())) kcal", systemImage: "flame.fill")
                         .font(.system(size: 12)).foregroundStyle(DS.Colors.amber)
+                        .monospacedDigit()
                 }
                 if amountText != "1 serving" {
                     Text(amountText).font(.system(size: 12)).foregroundStyle(DS.Colors.textMuted)
+                }
+            }
+
+            // How much of the saved recipe actually got eaten. Without this he
+            // saves the dish a second time at a smaller size and ends up with
+            // two favorites that disagree by hundreds of kcal.
+            HStack(spacing: 6) {
+                ForEach(Array(FoodFavorite.scales.enumerated()), id: \.offset) { _, s in
+                    Button {
+                        DS.Haptic.select()
+                        favScale = s.1
+                    } label: {
+                        Text(s.0)
+                            .font(.system(size: 13, weight: .semibold, design: .rounded))
+                            .foregroundStyle(favScale == s.1 ? DS.Colors.violet : DS.Colors.textMuted)
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 7)
+                            .background(
+                                RoundedRectangle(cornerRadius: DS.Radius.sm, style: .continuous)
+                                    .fill(favScale == s.1 ? DS.Colors.violet.opacity(0.14) : DS.Colors.surfaceElevated)
+                            )
+                    }
+                    .buttonStyle(.plain)
                 }
             }
         }
@@ -2564,7 +2589,7 @@ private struct QuickLogEditorSheet: View {
             let saved: FoodEntry
             switch source {
             case .favorite(let fav):
-                saved = try await SupabaseClient.shared.logFromFavorite(fav, capturedAt: eatenAt)
+                saved = try await SupabaseClient.shared.logFromFavorite(fav, capturedAt: eatenAt, scale: favScale)
             case .preset(let item):
                 var notes: [String] = []
                 let amt = amountText.trimmingCharacters(in: .whitespaces)

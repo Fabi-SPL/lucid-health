@@ -3047,23 +3047,43 @@ extension SupabaseClient {
         return out
     }
 
+    /// Scale a saved meal to the portion actually eaten. Saving the same dish
+    /// twice at two sizes is how "Fusilli" ended up as two favorites 884 kcal
+    /// apart — one recipe times a fraction is the fix.
+    static func scale(_ items: [DetectedItem], by f: Double) -> [DetectedItem] {
+        guard f != 1.0 else { return items }
+        return items.map { i in
+            var s = i
+            s.grams = Int((Double(i.grams) * f).rounded())
+            s.kcal = Int((Double(i.kcal) * f).rounded())
+            s.caloriesLow = i.caloriesLow.map { Int((Double($0) * f).rounded()) }
+            s.caloriesHigh = i.caloriesHigh.map { Int((Double($0) * f).rounded()) }
+            s.proteinG = i.proteinG.map { ($0 * f * 10).rounded() / 10 }
+            s.carbsG = i.carbsG.map { ($0 * f * 10).rounded() / 10 }
+            s.fatG = i.fatG.map { ($0 * f * 10).rounded() / 10 }
+            s.fiberG = i.fiberG.map { ($0 * f * 10).rounded() / 10 }
+            return s
+        }
+    }
+
     /// One-tap re-log of a saved favorite → a normal food_entries row at `capturedAt`.
-    func logFromFavorite(_ fav: FoodFavorite, capturedAt: Date = Date()) async throws -> FoodEntry {
+    func logFromFavorite(_ fav: FoodFavorite, capturedAt: Date = Date(), scale f: Double = 1.0) async throws -> FoodEntry {
+        let scaled = Self.scale(fav.items, by: f)
         let entry = FoodEntry(
             id: nil,
             userId: userId,
             capturedAt: capturedAt,
             photoUrl: nil,
             geminiRawJson: nil,
-            items: fav.items,
-            caption: fav.name,
-            totalKcal: fav.totalKcal,
+            items: scaled,
+            caption: f == 1.0 ? fav.name : "\(fav.name) · \(FoodFavorite.scaleLabel(f))",
+            totalKcal: fav.totalKcal.map { Int((Double($0) * f).rounded()) },
             novaAvg: fav.novaAvg,
             mindScore: fav.mindScore,
             confidence: fav.confidence ?? "high",
             source: "favorite",
             createdAt: nil,
-            logQuality: FoodEntry.computeLogQuality(source: "favorite", confidence: fav.confidence, items: fav.items)
+            logQuality: FoodEntry.computeLogQuality(source: "favorite", confidence: fav.confidence, items: scaled)
         )
         let saved = try await saveFoodEntry(entry)
         bumpFavoriteUsage(fav)
