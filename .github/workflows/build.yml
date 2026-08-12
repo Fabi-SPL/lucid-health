@@ -147,17 +147,13 @@ jobs:
           path: ${{ runner.temp }}/LucidHealth.ipa
           retention-days: 30
 
-      - name: Create GitHub Release
-        uses: softprops/action-gh-release@v2
-        with:
-          tag_name: lucidhealth-build-${{ github.run_number }}
-          name: "LucidHealth build ${{ github.run_number }}"
-          body: |
-            Build ${{ github.run_number }} — ${{ github.sha }}
-          files: ${{ runner.temp }}/LucidHealth.ipa
-          make_latest: false
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      # NOTE: the old "Create GitHub Release" step was removed deliberately.
+      # It attached the built IPA to a public Release every run. The build
+      # sed-injects prefilledEmail/prefilledPassword into the binary, so every
+      # published Release shipped working login credentials to anyone who
+      # downloaded it. AltStore reads the source + IPA from Supabase Storage
+      # (uploaded below), so Releases were redundant AND a credential leak.
+      # Do not re-add. Same reasoning as the lucid-ride security commit.
 
       - name: Stage IPA for source build (ephemeral — never committed)
         run: |
