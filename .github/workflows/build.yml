@@ -44,6 +44,31 @@ jobs:
       # server (analyze_food_photo / analyze_food_text RPCs), key lives in Supabase
       # Vault. Nothing secret ships in the public IPA. (Old inject+echo step removed.)
 
+      # A missing secret substitutes as an empty string and the build still goes
+      # green — it just ships an IPA that cannot log in. That is exactly what
+      # happened when this repo was deleted and re-uploaded: HERMES_USER_ID was
+      # never re-added, so the app baked `userId = ""` and signed itself out.
+      # Fail here instead, where the cause is legible.
+      - name: Require every injected secret to exist
+        env:
+          EE_TASKS_EMAIL: ${{ secrets.EE_TASKS_EMAIL }}
+          EE_TASKS_PASSWORD: ${{ secrets.EE_TASKS_PASSWORD }}
+          SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
+          HERMES_USER_ID: ${{ secrets.HERMES_USER_ID }}
+          SUPABASE_URL: ${{ vars.SUPABASE_URL || secrets.SUPABASE_URL }}
+        run: |
+          MISSING=""
+          for NAME in EE_TASKS_EMAIL EE_TASKS_PASSWORD SUPABASE_ANON_KEY HERMES_USER_ID SUPABASE_URL; do
+            eval "VALUE=\${$NAME}"
+            [ -n "$VALUE" ] || MISSING="$MISSING $NAME"
+          done
+          if [ -n "$MISSING" ]; then
+            echo "ERROR: missing repository secret(s)/variable(s):$MISSING"
+            echo "Add them under Settings > Secrets and variables > Actions, then re-run."
+            exit 1
+          fi
+          echo "All injected secrets present."
+
       - name: Inject auth credentials + Supabase config
         run: |
           # Email + password (login auto-fill)
