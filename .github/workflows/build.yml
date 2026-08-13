@@ -16,6 +16,20 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0   # full history — the build number is derived from it
+
+      # The build number used to be github.run_number. That counter belongs to
+      # the Actions history, not to the code, and when this repo's history was
+      # reset it restarted at 1 — stamping a build 1.0.1 while the phone had
+      # 1.0.96, so AltStore saw a downgrade and offered no update. Commit count
+      # is a property of the repository, so it cannot be reset out from under a
+      # released build.
+      - name: Derive build number from commit count
+        run: |
+          BUILD_NUM=$(git rev-list --count HEAD)
+          echo "BUILD_NUM=${BUILD_NUM}" >> $GITHUB_ENV
+          echo "Build number: ${BUILD_NUM} (run_number was ${GITHUB_RUN_NUMBER})"
 
       - name: Select latest Xcode
         run: |
@@ -77,8 +91,8 @@ jobs:
             AD_HOC_CODE_SIGNING_ALLOWED=YES \
             ASSETCATALOG_COMPILER_GENERATE_SWIFT_ASSET_SYMBOL_EXTENSIONS=NO \
             SWIFT_VERSION=5.0 \
-            CURRENT_PROJECT_VERSION=${GITHUB_RUN_NUMBER} \
-            MARKETING_VERSION=1.0.${GITHUB_RUN_NUMBER} \
+            CURRENT_PROJECT_VERSION=${BUILD_NUM} \
+            MARKETING_VERSION=1.0.${BUILD_NUM} \
             ARCHS=arm64 \
             ONLY_ACTIVE_ARCH=NO \
             EXCLUDED_ARCHS=x86_64 \
@@ -150,10 +164,10 @@ jobs:
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: lucidhealth-build-${{ github.run_number }}
-          name: "LucidHealth build ${{ github.run_number }}"
+          tag_name: lucidhealth-build-${{ env.BUILD_NUM }}
+          name: "LucidHealth build ${{ env.BUILD_NUM }}"
           body: |
-            Build ${{ github.run_number }} — ${{ github.sha }}
+            Build ${{ env.BUILD_NUM }} — ${{ github.sha }}
           files: ${{ runner.temp }}/LucidHealth.ipa
           make_latest: false
         env:
@@ -170,7 +184,7 @@ jobs:
 
       - name: Update AltStore Source JSON (merge — preserve sibling apps)
         env:
-          RUN_NUMBER: ${{ github.run_number }}
+          RUN_NUMBER: ${{ env.BUILD_NUM }}
           SUPABASE_STORAGE_PUBLIC_BASE: ${{ vars.SUPABASE_STORAGE_PUBLIC_BASE }}
         run: |
           IPA_SIZE=$(stat -f%z $RUNNER_TEMP/LucidHealth.ipa)
@@ -215,7 +229,7 @@ jobs:
         env:
           SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
           SUPABASE_STORAGE_WRITE_BASE: ${{ vars.SUPABASE_STORAGE_WRITE_BASE }}
-          RUN_NUMBER: ${{ github.run_number }}
+          RUN_NUMBER: ${{ env.BUILD_NUM }}
         run: |
           STORAGE_BASE="${SUPABASE_STORAGE_WRITE_BASE}"
 
@@ -246,8 +260,8 @@ jobs:
             --data-binary @public/altstore-source.json
 
           echo ""
-          echo "Uploading LucidHealth-${{ github.run_number }}.ipa (versioned)..."
-          curl -fsS -X PUT "${STORAGE_BASE}/LucidHealth-${{ github.run_number }}.ipa" \
+          echo "Uploading LucidHealth-${{ env.BUILD_NUM }}.ipa (versioned)..."
+          curl -fsS -X PUT "${STORAGE_BASE}/LucidHealth-${{ env.BUILD_NUM }}.ipa" \
             -H "Authorization: Bearer ${SUPABASE_SERVICE_KEY}" \
             -H "Content-Type: application/octet-stream" \
             -H "x-upsert: true" \
