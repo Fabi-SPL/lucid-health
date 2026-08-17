@@ -149,4 +149,4 @@ Hermes, the body-state interpreter, is deliberately not a wellness app. The syst
 
 ## License
 
-MIT, see [LICENSE](./LICENSE). No warranty, no medical advice, not a medical device. If your body is doing something weird, see a doctor.
+Apache 2.0, see [LICENSE](./LICENSE). No warranty, no medical advice, not a medical device. If your body is doing something weird, see a doctor.
