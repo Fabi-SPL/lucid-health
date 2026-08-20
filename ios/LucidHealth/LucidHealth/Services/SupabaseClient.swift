@@ -1,5 +1,6 @@
 import Foundation
 import UIKit
+import CryptoKit
 
 /// Combined health + food Supabase client for LucidHealth.
 /// Merges LucidBridge full client with LucidFoods food methods.
@@ -3049,17 +3050,42 @@ extension SupabaseClient {
 
     // MARK: - Auto-login (Foods pattern)
 
+    /// Identifies the build-time credential without storing it in the clear a second time.
+    static func credentialFingerprint(email: String, password: String) -> String {
+        SHA256.hash(data: Data("\(email)|\(password)".utf8))
+            .map { String(format: "%02x", $0) }
+            .joined()
+    }
+
     /// Seeds UserDefaults with CI-injected credentials if not yet set, then signs in.
     /// Safe to call on every launch — idempotent, non-blocking.
     func signInIfNeeded() async {
         let filled = Self.prefilledEmail
         let filledPass = Self.prefilledPassword
         guard filled != "BUILD_EMAIL", filledPass != "BUILD_PASSWORD" else { return }
-        if UserDefaults.standard.string(forKey: "lucidhealth_email")?.isEmpty ?? true {
-            UserDefaults.standard.set(filled, forKey: "lucidhealth_email")
-        }
-        if UserDefaults.standard.string(forKey: "lucidhealth_password")?.isEmpty ?? true {
-            UserDefaults.standard.set(filledPass, forKey: "lucidhealth_password")
+
+        // Seeding only-when-empty meant a rotated password never reached the app.
+        // UserDefaults survives a sideload reinstall, so the pre-rotation value
+        // stayed put and every launch re-tried a credential the server had already
+        // invalidated. The fingerprint records which build-time credential was last
+        // seeded: a rotation overwrites, a manual Settings override still survives.
+        let d = UserDefaults.standard
+        let fingerprint = Self.credentialFingerprint(email: filled, password: filledPass)
+        if d.string(forKey: "lucidhealth_cred_fingerprint") != fingerprint {
+            d.set(filled, forKey: "lucidhealth_email")
+            d.set(filledPass, forKey: "lucidhealth_password")
+            d.set(fingerprint, forKey: "lucidhealth_cred_fingerprint")
+            accessToken = nil
+            tokenExpiry = nil
+            pushDebugLog(key: "credentials_reseeded",
+                         value: "reason=build_credential_changed fp=\(fingerprint.prefix(8))")
+        } else {
+            if d.string(forKey: "lucidhealth_email")?.isEmpty ?? true {
+                d.set(filled, forKey: "lucidhealth_email")
+            }
+            if d.string(forKey: "lucidhealth_password")?.isEmpty ?? true {
+                d.set(filledPass, forKey: "lucidhealth_password")
+            }
         }
         guard !isAuthenticated else { return }
         try? await ensureAuth()
