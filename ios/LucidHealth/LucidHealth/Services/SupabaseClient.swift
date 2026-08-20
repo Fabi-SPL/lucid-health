@@ -179,15 +179,119 @@ class SupabaseClient {
     private let queueKey = "lucid_offline_write_queue"
     private var isFlushingQueue = false
 
+    // v142 — upload health telemetry. Nothing on the failure path used to reach
+    // bridge_logs, which is why the 93-min upload wedge on 2026-08-11 was invisible.
+    private var lastPushOK: Date?
+    private var consecutivePushFailures = 0
+    private var lastStallReport: Date?
+    private var stallStartedAt: Date?
+    private var lastQueueDepthReport: Date?
+    private var lastWatchdogReport: Date?
+    private var lastFailureDrain: Date?
+
+    /// BLE link state, injected by BLEManager — used only for push_watchdog payloads.
+    var bleConnectedHook: (() -> Bool)?
+
+    private static let recordedAtFormatter: ISO8601DateFormatter = {
+        let f = ISO8601DateFormatter()
+        f.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        return f
+    }()
+
     init() {
         // Flush any queued writes from previous sessions
         Task { await flushOfflineQueue() }
     }
 
-    private func queueOfflineWrite(_ body: [String: Any], endpoint: String, extraHeaders: [String: String] = [:]) {
+    private var offlineQueueDepth: Int {
+        (UserDefaults.standard.array(forKey: queueKey) as? [[String: Any]])?.count ?? 0
+    }
+
+    private var offlineQueueOldestAge: TimeInterval? {
+        guard let first = (UserDefaults.standard.array(forKey: queueKey) as? [[String: Any]])?.first,
+              let ts = first["ts"] as? TimeInterval else { return nil }
+        return Date().timeIntervalSince1970 - ts
+    }
+
+    /// v142 — failure-path drain. The queue used to flush ONLY on a successful push,
+    /// so once uploads started failing nothing retried until one spontaneously worked.
+    /// Backs off 60s so it can't hot-loop behind a dead network.
+    private func drainQueueAfterFailure() async {
+        if let last = lastFailureDrain, Date().timeIntervalSince(last) < 60 { return }
+        lastFailureDrain = Date()
+        await flushOfflineQueue()
+    }
+
+    private func recordPushFailure(endpoint: String, reason: String) {
+        consecutivePushFailures += 1
+        if stallStartedAt == nil { stallStartedAt = Date() }
+        let since = lastPushOK ?? stallStartedAt ?? Date()
+        let stalledS = Int(Date().timeIntervalSince(since))
+
+        guard consecutivePushFailures >= 3 else { return }
+        if let last = lastStallReport, Date().timeIntervalSince(last) < 120 { return }
+        lastStallReport = Date()
+        pushDebugLog(key: "upload_stall",
+                     value: "endpoint=\(endpoint) fails=\(consecutivePushFailures) stalled_s=\(stalledS) queued_depth=\(offlineQueueDepth) reason=\(reason)")
+
+        // Self-heal — a long stall is usually a dead token; force a fresh auth.
+        if stalledS > 300 {
+            accessToken = nil
+            tokenExpiry = nil
+        }
+    }
+
+    private func recordPushSuccess(flushed: Int) {
+        if consecutivePushFailures >= 3, let start = stallStartedAt {
+            pushDebugLog(key: "upload_recovered",
+                         value: "stalled_s=\(Int(Date().timeIntervalSince(start))) flushed=\(flushed) queue_remaining=\(offlineQueueDepth)")
+        }
+        consecutivePushFailures = 0
+        stallStartedAt = nil
+        lastStallReport = nil
+        lastPushOK = Date()
+    }
+
+    private func reportQueueDepthIfNeeded() {
+        let depth = offlineQueueDepth
+        guard depth > 0 else { return }
+        if let last = lastQueueDepthReport, Date().timeIntervalSince(last) < 300 { return }
+        lastQueueDepthReport = Date()
+        let age = offlineQueueOldestAge.map { Int($0) } ?? -1
+        pushDebugLog(key: "offline_queue_depth", value: "depth=\(depth) oldest_age_s=\(age)")
+    }
+
+    private func checkPushWatchdog() async {
+        // First attempt of the process seeds the clock so a relaunch mid-wedge
+        // still gets a stall horizon instead of staying blind.
+        guard let ok = lastPushOK else { lastPushOK = Date(); return }
+        let stalledS = Int(Date().timeIntervalSince(ok))
+        guard stalledS > 300 else { return }
+        if let last = lastWatchdogReport, Date().timeIntervalSince(last) < 300 { return }
+        lastWatchdogReport = Date()
+        let connected = bleConnectedHook?() ?? false
+        let appState = await MainActor.run { () -> String in
+            switch UIApplication.shared.applicationState {
+            case .active: return "active"
+            case .inactive: return "inactive"
+            case .background: return "background"
+            @unknown default: return "unknown"
+            }
+        }
+        pushDebugLog(key: "push_watchdog",
+                     value: "stalled_s=\(stalledS) ble_connected=\(connected) app_state=\(appState)")
+    }
+
+    private func queueOfflineWrite(_ body: [String: Any], endpoint: String, extraHeaders: [String: String] = [:], recordedAt: Date? = nil) {
         var queue = UserDefaults.standard.array(forKey: queueKey) as? [[String: Any]] ?? []
         var entry: [String: Any] = ["body": body, "endpoint": endpoint, "ts": Date().timeIntervalSince1970]
         if !extraHeaders.isEmpty { entry["headers"] = extraHeaders }
+        // v142 — stamp the SAMPLE time so a replayed row lands when it was measured,
+        // not when the queue drained (39 rows landed inside one second at 00:00:32
+        // and fed false timestamps into sleep staging).
+        if let recordedAt, body["recorded_at"] == nil {
+            entry["recorded_at"] = SupabaseClient.recordedAtFormatter.string(from: recordedAt)
+        }
         queue.append(entry)
         // Cap at 500 entries (~8 hours of 10s readings)
         if queue.count > 500 { queue = Array(queue.suffix(500)) }
@@ -195,22 +299,27 @@ class SupabaseClient {
         log("Queued offline write (\(queue.count) pending)")
     }
 
-    private func flushOfflineQueue() async {
-        guard !isFlushingQueue else { return }
+    @discardableResult
+    private func flushOfflineQueue() async -> Int {
+        guard !isFlushingQueue else { return 0 }
         isFlushingQueue = true
         defer { isFlushingQueue = false }
 
-        guard var queue = UserDefaults.standard.array(forKey: queueKey) as? [[String: Any]], !queue.isEmpty else { return }
+        guard var queue = UserDefaults.standard.array(forKey: queueKey) as? [[String: Any]], !queue.isEmpty else { return 0 }
 
         do {
             try await ensureAuth()
-            guard let token = accessToken else { return }
+            guard let token = accessToken else { return 0 }
 
             var flushed = 0
             while !queue.isEmpty {
                 var entry = queue.removeFirst()
-                guard let body = entry["body"] as? [String: Any],
+                guard var body = entry["body"] as? [String: Any],
                       let endpoint = entry["endpoint"] as? String else { continue }
+                // v142 — replay at the sample time, not the drain time.
+                if let stamp = entry["recorded_at"] as? String, body["recorded_at"] == nil {
+                    body["recorded_at"] = stamp
+                }
 
                 let url = URL(string: "\(baseURL)/rest/v1/\(endpoint)")!
                 var request = URLRequest(url: url)
@@ -259,8 +368,10 @@ class SupabaseClient {
 
             UserDefaults.standard.set(queue, forKey: queueKey)
             if flushed > 0 { log("Flushed \(flushed) offline writes (\(queue.count) remaining)") }
+            return flushed
         } catch {
             log("Queue flush error: \(error.localizedDescription)")
+            return 0
         }
     }
 
@@ -319,6 +430,9 @@ class SupabaseClient {
         // rr / respiratory / sleep_stage / skin_temp / all HI-v2 / movement on every
         // network blip. NOTE: recorded_at is deliberately NOT sent — the v138 gap-check
         // (fetchSyncCursor) depends on live rows stamping server now(); do not add it.
+        // v142 — sampleTime is carried into the offline queue ONLY, so replayed rows
+        // land at their true time; live pushes still stamp server now().
+        let sampleTime = Date()
         var body: [String: Any] = [
             "user_id": userId,
             "heart_rate": hr,
@@ -392,6 +506,8 @@ class SupabaseClient {
                 request.setValue("application/json", forHTTPHeaderField: "Content-Type")
                 request.setValue(anonKey, forHTTPHeaderField: "apikey")
                 request.setValue("Bearer \(accessToken ?? "")", forHTTPHeaderField: "Authorization")
+                // v142 — a wedged socket must not hold the background-task assertion open.
+                request.timeoutInterval = 15
                 request.httpBody = try JSONSerialization.data(withJSONObject: body)
                 let (data, response) = try await session.data(for: request)
                 let statusCode = (response as? HTTPURLResponse)?.statusCode ?? 0
@@ -402,10 +518,15 @@ class SupabaseClient {
                 return statusCode
             }
 
+            await checkPushWatchdog()
+            reportQueueDepthIfNeeded()
+
             do {
                 try await ensureAuth()
                 guard accessToken != nil else {
                     log("Skip push — no auth token")
+                    recordPushFailure(endpoint: "realtime_health", reason: "no_auth_token")
+                    await drainQueueAfterFailure()
                     return
                 }
 
@@ -425,14 +546,20 @@ class SupabaseClient {
                 if statusCode < 300 {
                     log("Pushed HR:\(hr) HRV:\(String(format: "%.1f", hrv))")
                     // Flush any queued writes while we have connectivity
-                    await flushOfflineQueue()
+                    let flushed = await flushOfflineQueue()
+                    recordPushSuccess(flushed: flushed)
                 } else {
-                    queueOfflineWrite(body, endpoint: "realtime_health")
+                    queueOfflineWrite(body, endpoint: "realtime_health", recordedAt: sampleTime)
+                    recordPushFailure(endpoint: "realtime_health", reason: "http_\(statusCode)")
+                    await drainQueueAfterFailure()
                 }
             } catch {
                 log("PUSH ERROR: \(error.localizedDescription)")
                 // Network error — queue the FULL body for later (was a 4-field stub)
-                queueOfflineWrite(body, endpoint: "realtime_health")
+                queueOfflineWrite(body, endpoint: "realtime_health", recordedAt: sampleTime)
+                let reason = (error as? URLError).map { "urlerror_\($0.errorCode)" } ?? "error"
+                recordPushFailure(endpoint: "realtime_health", reason: reason)
+                await drainQueueAfterFailure()
             }
         }
     }

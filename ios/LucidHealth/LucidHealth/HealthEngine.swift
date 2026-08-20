@@ -181,25 +181,18 @@ class HealthEngine: ObservableObject {
     var alcoholActive: Bool {
         UserDefaults.standard.bool(forKey: "lucid_alcohol_active")
     }
-    var alarmEnabled: Bool {
-        // Alcohol mode keeps a humane noon backstop armed even if the user's
-        // own alarm is off — it just never force-wakes early.
-        if alcoholActive { return true }
-        return UserDefaults.standard.bool(forKey: "lucid_alarm_enabled")
-    }
+    // Local alarm is the alcohol backstop only. The old `lucid_alarm_*` defaults
+    // were read here but written by nothing; the server smart-wake owns waking.
+    var alarmEnabled: Bool { alcoholActive }
     var alarmWindowStart: Int {
-        if alcoholActive {
-            let s = UserDefaults.standard.integer(forKey: "lucid_alcohol_start")
-            return s > 0 ? s : 9 * 60       // 09:00 — no earlier
-        }
-        return UserDefaults.standard.integer(forKey: "lucid_alarm_start")
+        guard alcoholActive else { return 0 }
+        let s = UserDefaults.standard.integer(forKey: "lucid_alcohol_start")
+        return s > 0 ? s : 9 * 60           // 09:00 — no earlier
     }
     var alarmWindowEnd: Int {
-        if alcoholActive {
-            let e = UserDefaults.standard.integer(forKey: "lucid_alcohol_end")
-            return e > 0 ? e : 12 * 60      // 12:00 backstop
-        }
-        return UserDefaults.standard.integer(forKey: "lucid_alarm_end")
+        guard alcoholActive else { return 0 }
+        let e = UserDefaults.standard.integer(forKey: "lucid_alcohol_end")
+        return e > 0 ? e : 12 * 60          // 12:00 backstop
     }
     var alarmFiredToday = false
     /// Date the alarm last fired. Used to auto-reset alarmFiredToday across days

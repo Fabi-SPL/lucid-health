@@ -256,6 +256,12 @@ class BLEManager: NSObject, ObservableObject {
     private var historyBuffer: [HRReading] = []
     private var historyBatchCount = 0
     private var historyRawCaptureCount = 0  // v113 — bounds raw-hex logging of history packets per sync
+    // v142 — history frame accounting. Frames used to die silently at the hr>0 gate.
+    private var historyShapeReported = false
+    private var historyFramesSeen = 0
+    private var historyParsedOK = 0
+    private var historySkippedZeroHR = 0
+    private var historyRejectedShape = 0
     private var historySyncTimer: DispatchSourceTimer?  // background-safe (was Timer on main runloop — frozen while suspended)
     private let lastSyncKey = "lucid_last_sync_timestamp"
 
@@ -342,6 +348,10 @@ class BLEManager: NSObject, ObservableObject {
         super.init()
         supabase.onLog = { [weak self] msg in
             self?.log(msg)
+        }
+        supabase.bleConnectedHook = { [weak self] in
+            guard let self else { return false }
+            return self.connectionState == .streaming || self.connectionState == .connected
         }
 
         // Wire activity detector
@@ -1470,6 +1480,8 @@ class BLEManager: NSObject, ObservableObject {
     /// counter. Name kept to avoid churning the two call sites.
     private func sendHistoryRequestWithPreamble(_ p: CBPeripheral, _ c: CBCharacteristic, trigger: String) {
         historyRawCaptureCount = 0
+        historyShapeReported = false
+        resetHistoryFrameCounters()
         p.writeValue(WhoopProtocol.requestHistoryPacket(), for: c, type: .withResponse)
         supabase.pushDebugLog(key: "history_request_sent_bare", value: "trigger=\(trigger) v114 bare-cmd22 (preamble reverted)")
         log("History request (bare CMD 22) sent [\(trigger)] — waiting for strap…")
@@ -1570,6 +1582,8 @@ class BLEManager: NSObject, ObservableObject {
         DispatchQueue.main.async { self.isHistorySyncing = false }
 
         let trigger = isManualBackfillMode ? "manual-72h" : "auto-reconnect"
+        // v142 — flush the tail batch's counters; the 120s-timeout path never sees END.
+        if historyFramesSeen > 0 { reportHistoryParseCounters(trigger: trigger) }
         supabase.pushDebugLog(key: "history_sync_complete", value: "trigger=\(trigger) records=\(historyBuffer.count) batches=\(historyBatchCount)")
 
         // Manual UI: jump to "parsing" state immediately
@@ -1810,21 +1824,61 @@ class BLEManager: NSObject, ObservableObject {
             )
         }
 
+        // v142 — shape discriminator. Firmware 41.x sends type=47 cmd=0 len=73 raw
+        // waveform frames; the legacy <LHLB> parser read byte 14 (a constant 0/1
+        // there) and every frame died at the hr>0 gate below with zero telemetry,
+        // so three days of missing data looked identical to "strap had nothing".
+        let isRaw = WhoopProtocol.isRawWaveformFrame(data: packet.data)
+        if !historyShapeReported {
+            historyShapeReported = true
+            let trigger = isManualBackfillMode ? "manual-72h" : "auto-reconnect"
+            supabase.pushDebugLog(
+                key: "history_frame_shape",
+                value: "trigger=\(trigger) type=\(packet.type) cmd=\(packet.cmd) len=\(packet.data.count) decoder_selected=\(isRaw ? "raw_waveform_stub" : "legacy_lhlb")"
+            )
+        }
+
         // Parse the record — we only need HR and RR values
         // Timestamps will be distributed evenly across the gap later
-        if let reading = WhoopProtocol.parseHistoricalRecord(data: packet.data) {
-            if reading.heartRate > 0 {
-                historyBuffer.append(reading)
-                let count = historyBuffer.count
-                if count % 500 == 0 {
-                    DispatchQueue.main.async {
-                        self.historySyncCount = count
-                        self.historySyncProgress = "Downloaded \(count) readings..."
-                    }
-                    log("History: \(count) records buffered")
-                }
-            }
+        historyFramesSeen += 1
+        let parsed = isRaw
+            ? WhoopProtocol.parseHistoricalRawFrame(data: packet.data)
+            : WhoopProtocol.parseHistoricalRecord(data: packet.data)
+
+        guard let reading = parsed else {
+            historyRejectedShape += 1
+            return
         }
+        guard reading.heartRate > 0 else {
+            historySkippedZeroHR += 1
+            return
+        }
+
+        historyParsedOK += 1
+        historyBuffer.append(reading)
+        let count = historyBuffer.count
+        if count % 500 == 0 {
+            DispatchQueue.main.async {
+                self.historySyncCount = count
+                self.historySyncProgress = "Downloaded \(count) readings..."
+            }
+            log("History: \(count) records buffered")
+        }
+    }
+
+    private func resetHistoryFrameCounters() {
+        historyFramesSeen = 0
+        historyParsedOK = 0
+        historySkippedZeroHR = 0
+        historyRejectedShape = 0
+    }
+
+    private func reportHistoryParseCounters(trigger: String) {
+        supabase.pushDebugLog(
+            key: "history_parse_reject",
+            value: "trigger=\(trigger) batch=\(historyBatchCount) frames_seen=\(historyFramesSeen) parsed_ok=\(historyParsedOK) rejected_zero_hr=\(historySkippedZeroHR) rejected_shape=\(historyRejectedShape)"
+        )
+        resetHistoryFrameCounters()
     }
 
     private func handleHistoryMetadata(_ packet: WhoopPacket) {
@@ -1845,6 +1899,7 @@ class BLEManager: NSObject, ObservableObject {
             // trim froze at 655360 across 68 batches → strap re-sent batch 1 forever
             // → 0 records. We now ACK with [10:14] and log BOTH candidates so one
             // real sync proves which offset the firmware actually uses.
+            reportHistoryParseCounters(trigger: trigger)
             let d = packet.data
             let s = d.startIndex
             let metaHex = d.prefix(32).map { String(format: "%02x", $0) }.joined()

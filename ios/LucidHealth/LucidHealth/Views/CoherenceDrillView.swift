@@ -41,6 +41,8 @@ struct CoherenceDrillView: View {
 
     // Persistence
     @State private var saved: Bool = false
+    @State private var saveFailed: Bool = false
+    @State private var saving: Bool = false
 
     enum SessionPhase {
         case ready, running, complete
@@ -274,6 +276,29 @@ struct CoherenceDrillView: View {
             .padding(DS.Spacing.lg)
             .glassDefault()
 
+            if saveFailed {
+                HStack(spacing: 8) {
+                    Image(systemName: "arrow.clockwise.circle")
+                        .foregroundStyle(DS.Colors.amber)
+                    Text("this one didn't save yet")
+                        .font(.system(size: 12, design: .rounded))
+                        .foregroundStyle(DS.Colors.textSecondary)
+                    Spacer()
+                    Button {
+                        Task { await saveSession() }
+                    } label: {
+                        Text(saving ? "saving…" : "retry")
+                            .font(.system(size: 12, weight: .semibold, design: .rounded))
+                            .foregroundStyle(DS.Colors.violet)
+                    }
+                    .disabled(saving)
+                }
+                .padding(.horizontal, DS.Spacing.md)
+                .padding(.vertical, 10)
+                .background(DS.Colors.amber.opacity(0.10))
+                .clipShape(RoundedRectangle(cornerRadius: 12))
+            }
+
             HStack(spacing: DS.Spacing.md) {
                 Button {
                     resetSession()
@@ -432,6 +457,8 @@ struct CoherenceDrillView: View {
         liveCoherence = 0
         peakCoherence = 0
         saved = false
+        saveFailed = false
+        saving = false
         phase = .ready
         sphereScale = 0.4
     }
@@ -446,6 +473,7 @@ struct CoherenceDrillView: View {
     }
 
     private func saveSession() async {
+        await MainActor.run { saving = true }
         let postBaevsky = bleManager.healthEngine.baevskyStress
         let session = ExperimentalFeaturesService.CoherenceSession(
             duration_sec: elapsedSec,
@@ -458,6 +486,10 @@ struct CoherenceDrillView: View {
             target_breath_per_min: 6.0
         )
         let ok = await ExperimentalFeaturesService.shared.saveCoherenceSession(session)
-        await MainActor.run { saved = ok }
+        await MainActor.run {
+            saving = false
+            saved = ok
+            saveFailed = !ok
+        }
     }
 }

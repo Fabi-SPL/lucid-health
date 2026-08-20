@@ -254,6 +254,7 @@ struct PendingNudge {
     var metaKind: String? = nil     // metadata.kind — "smart_wake" for a v154 fire
     var sessionId: String? = nil    // metadata.session_id
     var reason: String? = nil       // metadata.reason (recovered_early | target_reached | …)
-    /// True when this row is a wake alarm — priority=='alarm' OR a smart_wake kind.
-    var isSmartWake: Bool { priority == "alarm" || metaKind == "smart_wake" }
+    /// True only for a real v154 smart-wake row. `priority == "alarm"` alone is
+    /// not enough — any nudge source can set it, and that fired the wake actuator.
+    var isSmartWake: Bool { metaKind == "smart_wake" }
 }

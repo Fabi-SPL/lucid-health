@@ -213,6 +213,10 @@ jobs:
           SUPABASE_STORAGE_PUBLIC_BASE: ${{ vars.SUPABASE_STORAGE_PUBLIC_BASE }}
         run: |
           IPA_SIZE=$(stat -f%z $RUNNER_TEMP/LucidHealth.ipa)
+          # The binary's real floor, not a guess. Declaring 16.0 while the app
+          # needs 26.0 makes AltStore offer an install that then fails on device.
+          MIN_OS=$(/usr/libexec/PlistBuddy -c "Print :MinimumOSVersion" "$RUNNER_TEMP/Payload/LucidHealth.app/Info.plist" 2>/dev/null || echo "16.0")
+          echo "Declaring minOSVersion=${MIN_OS}"
           BUILD_DATE_ISO=$(date -u +%Y-%m-%dT%H:%M:%S+00:00)
           STORAGE_BASE="${SUPABASE_STORAGE_PUBLIC_BASE}"
           # Versioned URL — AltStore client-side cache key is the URL. By making
@@ -239,8 +243,8 @@ jobs:
             "versionDate": "${BUILD_DATE_ISO}",
             "downloadURL": "${DOWNLOAD_URL}",
             "size": ${IPA_SIZE},
-            "minOSVersion": "16.0",
-            "versions": [{"version":"1.0.${RUN_NUMBER}","buildVersion":"${RUN_NUMBER}","date":"${BUILD_DATE_ISO}","size":${IPA_SIZE},"downloadURL":"${DOWNLOAD_URL}","localizedDescription":"Build ${RUN_NUMBER}","minOSVersion":"16.0"}],
+            "minOSVersion": "${MIN_OS}",
+            "versions": [{"version":"1.0.${RUN_NUMBER}","buildVersion":"${RUN_NUMBER}","date":"${BUILD_DATE_ISO}","size":${IPA_SIZE},"downloadURL":"${DOWNLOAD_URL}","localizedDescription":"Build ${RUN_NUMBER}","minOSVersion":"${MIN_OS}"}],
             "appPermissions": {"entitlements":[{"name":"com.apple.security.application-groups"}],"privacy":[{"name":"NSBluetoothAlwaysUsageDescription","usageDescription":"Connects to Whoop via BLE."},{"name":"NSBluetoothPeripheralUsageDescription","usageDescription":"Connects to Whoop via BLE (legacy peripheral key)."},{"name":"NSCameraUsageDescription","usageDescription":"Take photos of meals."},{"name":"NSPhotoLibraryUsageDescription","usageDescription":"Pick existing meal photos."},{"name":"NSHealthShareUsageDescription","usageDescription":"Reads health data from Apple Health for body-state correlation."},{"name":"NSHealthUpdateUsageDescription","usageDescription":"Writes recovery and HRV data back to Apple Health."},{"name":"NSLocationWhenInUseUsageDescription","usageDescription":"Tags meals and body-state snapshots with location."},{"name":"NSLocationAlwaysAndWhenInUseUsageDescription","usageDescription":"Background location for activity context (rides, walks)."}]}
           }
           JSONEND

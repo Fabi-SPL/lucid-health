@@ -341,7 +341,8 @@ struct SpiralAlertsLogCard: View {
             HStack {
                 SectionHeader(icon: "tornado", title: "Spiral Alerts", iconColor: DS.Colors.pink)
                 Spacer()
-                StatusChip(text: "\(alerts.count) recent", style: .violet)
+                StatusChip(text: !loaded ? "loading" : (alerts.isEmpty ? "not running" : "\(alerts.count) recent"),
+                           style: (loaded && alerts.isEmpty) ? .amber : .violet)
             }
 
             Text("Mini-Lucid pings when HRV crashes 20%+ and HR rises 15%+ for ≥10 min. Cooldown 4h.")
@@ -351,12 +352,15 @@ struct SpiralAlertsLogCard: View {
             if !loaded {
                 ProgressView().frame(maxWidth: .infinity).padding(.vertical, 12)
             } else if alerts.isEmpty {
-                HStack {
-                    Image(systemName: "checkmark.circle.fill")
-                        .foregroundStyle(DS.Colors.teal)
-                    Text("no spirals detected · clean week")
+                // Zero rows means the detector never ran, not that the week was
+                // clean — never read an empty table back as reassurance.
+                HStack(alignment: .top, spacing: 6) {
+                    Image(systemName: "pause.circle")
+                        .foregroundStyle(DS.Colors.amber)
+                    Text("detection isn't running yet — nothing has been checked, so there's nothing to report either way")
                         .font(.system(size: 12, design: .rounded))
                         .foregroundStyle(DS.Colors.textMuted)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
                 .padding(.vertical, 8)
             } else {

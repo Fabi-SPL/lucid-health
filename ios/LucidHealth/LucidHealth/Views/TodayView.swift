@@ -32,6 +32,7 @@ struct TodayView: View {
     @State private var showCoherenceDrill = false
     @State private var lastNight: SleepRestlessness? = nil
     @State private var illness: IllnessRisk? = nil
+    @State private var clockHour = Calendar.current.component(.hour, from: Date())
 
     // MARK: - Computed
 
@@ -59,6 +60,11 @@ struct TodayView: View {
     /// v98 — true while a sleep session is unfinished (wake detection hasn't fired).
     private var canManualWake: Bool {
         engine.sleepDetected || (engine.sleepStartTime != nil && engine.sleepEndTime == nil)
+    }
+
+    /// 19:00 → 05:00. Own time check, deliberately wider than wind-down mode.
+    private var smartWakeControlVisible: Bool {
+        clockHour >= 19 || clockHour < 5
     }
 
     // MARK: - Body
@@ -119,6 +125,12 @@ struct TodayView: View {
             illness = await SupabaseClient.shared.fetchIllnessRisk()
         }
         .onDisappear { modeStore.stop() }
+        // AppModeStore only publishes on a mode CHANGE, so the 19:00 boundary
+        // needs its own tick to bring the alarm card in.
+        .onReceive(Timer.publish(every: 60, on: .main, in: .common).autoconnect()) { now in
+            let h = Calendar.current.component(.hour, from: now)
+            if h != clockHour { clockHour = h }
+        }
         // Wind-down page comes up once per night when the mode flips to wind-down.
         .onChange(of: modeStore.current) { _, newMode in
             maybeShowWindDown(newMode)
@@ -129,6 +141,7 @@ struct TodayView: View {
         .onChange(of: scenePhase) { _, newPhase in
             bleManager.evt("app_state", "\(newPhase)")
             if newPhase == .active && hasLoaded {
+                clockHour = Calendar.current.component(.hour, from: Date())
                 Task { await refreshBodyMetrics() }
                 Task { await bleManager.syncTonightPlan() }
             }
@@ -260,7 +273,11 @@ struct TodayView: View {
                         .opacity(appeared ? 1 : 0)
                         .animation(DS.Anim.cardAppear, value: appeared)
                         .scrollSectionTransition()
+                }
 
+                // The alarm is armed from early evening on, not gated to
+                // wind-down — bed at 21:30 left no button anywhere in the app.
+                if smartWakeControlVisible {
                     SmartWakeControl(bleManager: bleManager)
                         .padding(.horizontal, DS.Spacing.md)
                         .padding(.top, DS.Spacing.md)

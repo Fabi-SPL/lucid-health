@@ -399,8 +399,11 @@ struct WhoopProtocol {
     /// Python ref: struct.unpack("<LHLB", pdata[4:15])
     /// Layout: [4 skip] [unix uint32=4B] [subsec uint16=2B] [unk uint32=4B] [hr uint8=1B]
     /// Then:   pdata[15] = rrnum, pdata[16:24] = rr1-4 as uint16 LE
+    /// v142 — upper bound added. Firmware 41.x sends 73-byte raw waveform frames on
+    /// the same type/cmd; byte 14 there is a constant 0/1, not HR, so this parser
+    /// must never see them (see isRawWaveformFrame).
     static func parseHistoricalRecord(data: Data) -> HRReading? {
-        guard data.count >= 24 else { return nil }
+        guard data.count >= 24, data.count < 70 else { return nil }
 
         let s = data.startIndex
         // pdata[4:8] = unix timestamp (uint32 LE)
@@ -425,6 +428,19 @@ struct WhoopProtocol {
         }
 
         return HRReading(timestamp: unix, heartRate: heart, rrIntervals: rrIntervals)
+    }
+
+    /// True when the frame is the firmware-41.x raw waveform shape (type=47 cmd=0
+    /// len=73) rather than the legacy <LHLB> HR record.
+    static func isRawWaveformFrame(data: Data) -> Bool {
+        return data.count >= 70
+    }
+
+    /// Firmware-41.x raw waveform frame. HR is NOT cooked into the packet — deriving
+    /// it is a separate reverse-engineering job, and guessing offsets would inject
+    /// fake HR into recovery scores. Returns nil until the layout is proven.
+    static func parseHistoricalRawFrame(data: Data) -> HRReading? {
+        return nil
     }
 
     /// Parse history batch metadata (type 49, cmd 2 = META_HISTORY_END)

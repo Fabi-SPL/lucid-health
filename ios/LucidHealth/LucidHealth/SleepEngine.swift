@@ -363,6 +363,8 @@ extension HealthEngine {
         }
 
         guard alarmEnabled, !alarmFiredToday, !alarmFiredPersistedToday else { return }
+        // An unset window reads back as 0/0, which would open the alarm at 00:00.
+        guard alarmWindowStart > 0, alarmWindowEnd > 0 else { return }
         guard minuteOfDay >= alarmWindowStart && minuteOfDay <= alarmWindowEnd else { return }
 
         // ROUND-ALARM GUARD: inside the wake window, if he's already up (HR-based —
