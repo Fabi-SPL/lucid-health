@@ -186,17 +186,10 @@ jobs:
           path: ${{ runner.temp }}/LucidHealth.ipa
           retention-days: 30
 
-      - name: Create GitHub Release
-        uses: softprops/action-gh-release@v2
-        with:
-          tag_name: lucidhealth-build-${{ env.BUILD_NUM }}
-          name: "LucidHealth build ${{ env.BUILD_NUM }}"
-          body: |
-            Build ${{ env.BUILD_NUM }} — ${{ github.sha }}
-          files: ${{ runner.temp }}/LucidHealth.ipa
-          make_latest: false
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      # The IPA carries the login credential compiled in, so it must not sit on a
+      # public GitHub Release. AltStore installs from the Supabase bucket below;
+      # the release step was pure exposure with nothing depending on it.
+      # (Removed 2026-08-20 after builds 177 and 178 were published and pulled.)
 
       - name: Stage IPA for source build (ephemeral — never committed)
         run: |
